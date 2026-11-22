@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const CFG = window.VANTA_CFG || {};
-  const ITER = 600000, AAD = new TextEncoder().encode('VNT1');
+  const ITER = 600000, AAD = new TextEncoder().encode('VNT1'), CMD_AAD = new TextEncoder().encode('VCMD1');
   let key = null, saltB64 = null, etag = null, lastBlob = null;
 
   const b64u = (s) => {
@@ -10,6 +10,10 @@
     const bin = atob(s), out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
+  };
+  const b64e = (u8) => {
+    let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   };
 
   async function fetchBlob() {
@@ -46,8 +50,9 @@
 
   async function derive(pass, salt) {
     const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+    // encrypt is used only for Sobot key-admin commands (AAD VCMD1). The vault format is unchanged.
     return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: ITER }, base,
-      { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+      { name: 'AES-GCM', length: 256 }, false, ['decrypt', 'encrypt']);
   }
 
   async function open(parts, k) {
@@ -76,6 +81,14 @@
       const p = split(blob);
       if (p.saltB64 !== saltB64) { Vault.lock(); const e = new Error('vault re-keyed'); e.code = 'REKEY'; throw e; }
       return open(p, key);
+    },
+    async sealCmd(obj) {
+      if (!key) throw new Error('locked');
+      const raw = new TextEncoder().encode(JSON.stringify(obj));
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: CMD_AAD }, key, raw));
+      const out = new Uint8Array(iv.length + ct.length); out.set(iv, 0); out.set(ct, iv.length);
+      return 'VCMD1.' + b64e(out);
     },
     lock() { key = null; saltB64 = null; lastBlob = null; etag = null; },
   };

@@ -4,6 +4,7 @@
   const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const TCFG = window.VANTA_CFG || {}; const IDLE_MS = TCFG.idleMsTest || 10 * 60 * 1000, POLL_MS = TCFG.pollMsTest || 75 * 1000;
   let D = null, section = 'home', pollT = null, lastAct = Date.now(), unsub = null;
+  let keysReveal = null, keysBusy = false, keysAcked = {};
   const sub = { desks: 'eq', pulse: 'overview', world: 'intel', sports: 'home', fno: 'NIFTY', mov: 'NIFTY', std: 'nba', curve: 'intraday', feed: 'all', news: 'all', wnews: 'all' };
   const prevScore = {};
   const NATIVE = window.VantaNative || null;
@@ -498,6 +499,74 @@
     pill.style.setProperty('width', on.offsetWidth + 'px'); pill.style.setProperty('transform', `translateX(${on.offsetLeft}px)`); if (!animate) requestAnimationFrame(() => pill.style.removeProperty('transition'));
     if (on.offsetLeft + on.offsetWidth > s.scrollLeft + s.clientWidth || on.offsetLeft < s.scrollLeft) s.scrollTo({ left: on.offsetLeft - 24, behavior: animate ? 'smooth' : 'auto' }); }); }
 
+
+  /* ── Sobot keys admin (Vanta only; behind the passphrase) ── */
+  const keysIst = (ts) => ts ? ist(ts, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) + ' IST' : '—';
+  async function keysSend(cmd) {
+    if (!Vault.unlocked) throw new Error('locked');
+    cmd.nonce = cmd.nonce || ('k' + Math.random().toString(16).slice(2) + Date.now().toString(16));
+    cmd.ts = Math.floor(Date.now() / 1000);
+    const blob = await Vault.sealCmd(cmd);
+    const bus = (D && D.keys_admin && D.keys_admin.bus) || '';
+    if (!bus) throw new Error('Command bus is not ready yet. Use the CLI on the box.');
+    const r = await fetch('https://ntfy.sh/' + encodeURIComponent(bus), {
+      method: 'POST', body: blob, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit',
+      headers: { 'Content-Type': 'text/plain' }
+    });
+    if (!r.ok) throw new Error('Could not reach the command bus (' + r.status + ')');
+    return cmd.nonce;
+  }
+
+  async function keysWait() {
+    for (let i = 0; i < 24; i++) {
+      await new Promise(r => setTimeout(r, 2500));
+      try {
+        const d = await Vault.refresh();
+        if (d) D = d;
+        keysTakeOutbox();
+        const box = (D && D.keys_admin && D.keys_admin.outbox) || null;
+        render({ keepScroll: true, quiet: true });
+        if (keysReveal && keysReveal.key) return;
+        if (box && (box.op === 'revoke' || box.ok === false)) return;
+      } catch (e) {}
+    }
+  }
+  function keysTakeOutbox() {
+    const box = (D && D.keys_admin && D.keys_admin.outbox) || null;
+    if (!box || !box.nonce || keysAcked[box.nonce]) return;
+    if (box.op === 'issue' && box.ok && box.key) {
+      keysReveal = { nonce: box.nonce, name: box.name, key: box.key, path: box.path || '' };
+    }
+  }
+  V.keys = () => {
+    keysTakeOutbox();
+    const A = (D && D.keys_admin) || {};
+    const rows = (A.keys || []).slice();
+    const box = A.outbox;
+    const err = (box && box.ok === false && box.error && !keysAcked[box.nonce]) ? box.error : (D && D.keys_admin_error ? 'Key list unavailable right now.' : '');
+    const okmsg = (box && box.ok && box.op === 'revoke' && !keysAcked[box.nonce]) ? ('Revoked ' + (box.name || '') + '. Remaining keys were rewrapped.') : '';
+    const list = rows.length
+      ? rows.map(k => `<div class="rowk"><div><div class="nm">${esc(k.name)}</div><div class="meta">${esc(keysIst(k.issued))}${k.id ? ' · ' + esc(k.id) : ''}</div></div><button type="button" class="act danger" data-keys="revoke" data-name="${esc(k.name)}">Revoke</button></div>`).join('')
+      : `<div class="empty">No Sobot login keys issued yet.</div>`;
+    let once = '';
+    if (keysReveal && keysReveal.key) {
+      once = `<div class="once"><b>New login key · shown once</b><code id="keys-once">${esc(keysReveal.key)}</code><p class="hint">Copy it now. It is also saved on the box at ${esc(keysReveal.path || '~/.config/sohit-desk/sobot-keys/' + (keysReveal.name || '') + '.key')} (chmod 600). This screen will not show it again after you confirm.</p><button type="button" class="ack" data-keys="copy">Copy key</button> <button type="button" class="ack" data-keys="ack">I've saved it</button></div>`;
+    }
+    const busOk = !!A.bus;
+    return `<div class="keys">
+      ${head('Sobot keys', 'issue and revoke')}
+      ${P(`<p class="lead">These keys open Sobot, not this vault. Issue and revoke run on the box. Your command is encrypted with the same key as this vault and sent over a private bus. A newly issued key is shown once, here only.</p>`)}
+      ${once}
+      ${err ? `<p class="msg err">${esc(err)}</p>` : ''}
+      ${okmsg ? `<p class="msg">${esc(okmsg)}</p>` : ''}
+      ${P(`<div class="issue"><input id="keys-name" type="text" maxlength="32" autocapitalize="off" spellcheck="false" placeholder="Name, e.g. ananya" aria-label="Key name"${keysBusy ? ' disabled' : ''}><button type="button" class="act" data-keys="issue"${keysBusy ? ' disabled' : ''}>Issue</button></div>`)}
+      ${P(list)}
+      ${P(`<p class="lead">${busOk ? 'The box poller is listening. You can also run this on the box:' : 'The command bus is not in the vault yet. Until the next vault publish, use the CLI on the box:'} <span class="meta">python3 /workspace/deskapp/sobot_keys.py issue|revoke|list</span></p>`)}
+      ${src('AES-256-GCM commands · keys never leave the box except this one-time reveal')}
+    </div>`;
+  };
+
+
   /* ── render ── */
   function render(opts = {}) {
     if (!D) return; const main = $('#view'); const y = scrollY;
@@ -508,7 +577,7 @@
   }
   function go(s, sb) { if (sb) { if (s === 'desks') sub.desks = sb; if (s === 'pulse') sub.pulse = sb; if (s === 'world') sub.world = sb; if (s === 'sports') { sub.sports = sb; if (Live.LABEL[sb]) Live.watch(sb); } }
     if (section !== s || sb) { section = s; H('light'); scrollTo({ top: 0 }); render(); } }
-  function placeDock() { const btns = $$('#dock button'); const i = btns.findIndex(b => b.dataset.go === section); btns.forEach((b, j) => b.classList.toggle('on', j === i)); const b = btns[i], pill = $('#pill'); if (!b) return;
+  function placeDock() { const btns = $$('#dock button'); const i = btns.findIndex(b => b.dataset.go === section); btns.forEach((b, j) => b.classList.toggle('on', j === i)); const kb = $('#keysbtn'); if (kb) kb.classList.toggle('on', section === 'keys'); const b = btns[i], pill = $('#pill'); if (!b) { if (pill) pill.style.width = '0'; return; }
     if (matchMedia('(min-width:1000px)').matches) { pill.style.removeProperty('width'); pill.style.setProperty('transform', `translateY(${b.offsetTop}px)`); }
     else { pill.style.setProperty('width', '22px'); pill.style.setProperty('transform', `translateX(${b.offsetLeft + (b.offsetWidth - 22) / 2}px)`); } }
 
@@ -543,7 +612,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Vault.unlocked && Date.now() - lastAct >= IDLE_MS) lock('Locked after 10 minutes idle.'); });
 
   function lock(msg) {
-    Vault.lock(); Live.stop(); unsub && unsub(); clearTimeout(pollT); D = null;
+    Vault.lock(); Live.stop(); unsub && unsub(); clearTimeout(pollT); D = null; keysReveal = null; keysBusy = false; keysAcked = {};
     $('#view').innerHTML = ''; $('#tape').innerHTML = ''; $('#tape').dataset.h = ''; for (const k in prevScore) delete prevScore[k];
     const app = $('#app'); app.classList.add('hidden'); app.classList.remove('reveal'); app.setAttribute('aria-hidden', 'true');
     const g = $('#gate'); g.classList.remove('hidden', 'leaving', 'working', 'bad'); $('#pass').value = ''; gateMsg(msg || ''); H('medium'); setupBio();
@@ -587,9 +656,53 @@
   $('#peek').addEventListener('click', () => { const i = $('#pass'); const on = i.type === 'password'; i.type = on ? 'text' : 'password'; $('#peek').classList.toggle('on', on); H('light'); });
   $('#bio').addEventListener('click', () => { H('light'); NATIVE && NATIVE.bioUnlock(); });
   $('#lock').addEventListener('click', () => lock('Locked.'));
+  $('#keysbtn').addEventListener('click', () => { H('light'); go('keys'); });
   $('#fresh').addEventListener('click', () => { H('light'); toast('Checking the vault…'); poll(); });
   $('#dock').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.go); });
-  $('#view').addEventListener('click', (e) => {
+  $('#view').addEventListener('click', async (e) => {
+    const kact = e.target.closest('[data-keys]');
+    if (kact) {
+      e.preventDefault();
+      const act = kact.dataset.keys;
+      try {
+        if (act === 'issue') {
+          const name = (($('#keys-name') || {}).value || '').trim();
+          if (!name) { toast('Enter a short name'); return; }
+          keysBusy = true; render({ keepScroll: true, quiet: true });
+          await keysSend({ op: 'issue', name });
+          toast('Issue sent. Waiting for the box…');
+          await keysWait();
+          keysBusy = false; render({ keepScroll: true, quiet: true });
+        } else if (act === 'revoke') {
+          const name = kact.dataset.name;
+          if (!name || !confirm('Revoke “' + name + '”? The data key will rotate and that login will stop working.')) return;
+          keysBusy = true; render({ keepScroll: true, quiet: true });
+          await keysSend({ op: 'revoke', name });
+          toast('Revoke sent. Waiting for the box…');
+          await keysWait();
+          keysBusy = false; render({ keepScroll: true, quiet: true });
+        } else if (act === 'copy') {
+          if (keysReveal && keysReveal.key && navigator.clipboard) {
+            await navigator.clipboard.writeText(keysReveal.key);
+            toast('Copied. Confirm once you have saved it.');
+          }
+        } else if (act === 'ack') {
+          const nonce = keysReveal && keysReveal.nonce;
+          if (nonce) {
+            keysAcked[nonce] = true;
+            try { await keysSend({ op: 'ack', nonce }); } catch (err) {}
+          }
+          keysReveal = null;
+          toast('Key dismissed from this screen.');
+          render({ keepScroll: true, quiet: true });
+        }
+      } catch (err) {
+        keysBusy = false;
+        toast(err.message || 'Command failed');
+        render({ keepScroll: true, quiet: true });
+      }
+      return;
+    }
     const s = e.target.closest('[data-sub]'); if (s) { const key = s.closest('[data-seg]').dataset.seg; if (sub[key] !== s.dataset.sub) { sub[key] = s.dataset.sub; H('light');
       if (key === 'sports') { if (Live.LABEL[s.dataset.sub]) Live.watch(s.dataset.sub); else Live.unwatch(); } render({ keepScroll: !['sports', 'pulse', 'world', 'desks'].includes(key) }); } return; }
     const j = e.target.closest('[data-jump]'); if (j) { e.preventDefault(); const [a, b] = j.dataset.jump.split(':'); go(a, b); return; }

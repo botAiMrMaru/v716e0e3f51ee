@@ -319,3 +319,25 @@ code{font:400 11px var(--mono);color:var(--gold2)}
 .xs .t{width:100%}.xs .t th:first-child,.xs .t td:first-child{position:sticky;left:0;z-index:1;background:var(--s1);box-shadow:1px 0 0 var(--line)}
 .xs .t td .spk{width:56px}
 .kpis .v small.fl{display:block;margin-top:4px;font:400 10.5px/1.2 var(--mono);color:var(--mu);white-space:normal}
+
+.keysbtn{width:30px;height:30px;display:grid;place-items:center;color:var(--tx2)}
+.keysbtn .ico{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5}
+.keysbtn.on,.keysbtn:hover{color:var(--gold2)}
+.keys{display:flex;flex-direction:column;gap:14px;padding:8px 0 28px}
+.keys h2{font:500 13px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;color:var(--tx2);margin:0}
+.keys .lead{font:400 13px/1.55 var(--sans);color:var(--tx2);margin:0}
+.keys .issue{display:flex;gap:8px;align-items:center}
+.keys .issue input{flex:1;min-width:0;background:transparent;border:0;border-bottom:1px solid var(--line2);padding:10px 2px;color:var(--tx);font:400 14px/1.2 var(--mono);outline:0}
+.keys .issue input:focus{border-color:var(--gold)}
+.keys .issue button,.keys .act,.keys .ack{height:36px;padding:0 14px;border:1px solid var(--goldl);border-radius:8px;color:var(--gold2);font:500 11px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;background:transparent}
+.keys .act.danger{border-color:rgba(220,80,80,.45);color:#e8a0a0}
+.keys .rowk{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.keys .rowk .nm{font:500 14px/1.2 var(--sans)}
+.keys .rowk .meta{font:400 11px/1.4 var(--mono);color:var(--dim)}
+.keys .once{border:1px solid var(--goldl);border-radius:10px;padding:14px 14px 12px;background:rgba(201,168,76,.06)}
+.keys .once b{display:block;font:500 11px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--gold2);margin-bottom:8px}
+.keys .once code{display:block;font:400 12px/1.5 var(--mono);word-break:break-all;color:var(--tx);margin:0 0 12px}
+.keys .once .hint{font:400 12px/1.5 var(--sans);color:var(--tx2);margin:0 0 12px}
+.keys .msg{font:400 13px/1.5 var(--sans);color:var(--tx2)}
+.keys .msg.err{color:#e8a0a0}
+.keys .empty{color:var(--dim);font:400 13px/1.5 var(--sans)}
