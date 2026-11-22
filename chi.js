@@ -120,7 +120,7 @@
     return alertOn;
   }
 
-  function toggleLang() { lang = lang === 'en' ? 'hi' : 'en'; applyLang(document); return lang; }
+  function toggleLang() { lang = lang === 'en' ? 'hi' : 'en'; applyLang(document); const m=document.querySelector('.lang-mark'); if(m) m.textContent = lang==='en' ? 'अ' : 'A'; return lang; }
 
   window.Chi = Object.freeze({ tv, weather, brief, meter, t, applyLang, watchPrices, enableAlerts, toggleLang, get lang() { return lang; }, get alerts() { return alertOn; } });
 })();
