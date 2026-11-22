@@ -44,7 +44,7 @@
       return `<div class="live-tile" data-live-id="${u.esc(v.v)}">
         <div class="live-frame">${eager ? `<iframe src="${src}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="${u.esc(v.name || 'Live')}"></iframe>` : `<button type="button" class="live-ph" data-live-load="${u.esc(v.v)}" aria-label="Load ${u.esc(v.name || 'live stream')}"></button>`}</div>
         <div class="live-bar"><span class="live-pip" aria-hidden="true"></span><span class="nm">${u.esc(v.name || '')}</span>
-          <button type="button" class="live-mute on" data-live-toggle="${u.esc(v.v)}" aria-label="Sound for ${u.esc(v.name || '')}">Tap for sound</button></div>
+          <button type="button" class="live-mute on" data-live-toggle="${u.esc(v.v)}" aria-label="Sound for ${u.esc(v.name || '')}">Sound</button></div>
       </div>`;
     }).join('');
     const title = (opts && opts.title) || 'Live now';
@@ -61,7 +61,7 @@
       if (!frame) return;
       frame.innerHTML = `<iframe src="${yt(id, mute, true)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="Live"></iframe>`;
       const btn = tile.querySelector('[data-live-toggle]');
-      if (btn) { btn.classList.toggle('on', !!mute); btn.textContent = mute ? 'Tap for sound' : 'Sound on'; }
+      if (btn) { btn.classList.toggle('on', !!mute); btn.textContent = mute ? 'Sound' : 'On'; }
     };
     root.querySelectorAll('[data-live-load]').forEach(ph => {
       const tile = ph.closest('.live-tile');
