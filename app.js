@@ -321,7 +321,7 @@
     const I = D.insight || {}; const f = I.fng, g = I.global || {}, cb = I.cb_premium, db = (I.deribit || {}).BTC || {}, r = (I.ratios || {}).BTC || {};
     if (!f && !g.mcap) return '';
     const kp = (l, v, c = '', extra = '') => `<div><div class="lbl">${l}</div><div class="v ${c}">${v}</div>${extra}</div>`;
-    return P(`<div class="kpis">${kp('Fear & Greed', f ? `${f.now} <small>${esc(f.label)}</small>` : '—', f ? fngCls(f.now) : '')}${kp('Crypto mcap', usd(g.mcap), '', `<div class="kx ${cls(g.mcap_chg)}">${pct(g.mcap_chg)}</div>`)}${kp('BTC dom', ok(g.btc_dom) ? g.btc_dom.toFixed(1) + '%' : '—')}
+    return P(`<div class="kpis">${kp('Fear & Greed', f ? `${f.now}<small class="fl">${esc(f.label)}</small>` : '—', f ? fngCls(f.now) : '')}${kp('Crypto mcap', usd(g.mcap), '', `<div class="kx ${cls(g.mcap_chg)}">${pct(g.mcap_chg)}</div>`)}${kp('BTC dom', ok(g.btc_dom) ? g.btc_dom.toFixed(1) + '%' : '—')}
       <div class="last-row">${kp('CB premium', cb ? pct(cb.prem_pct, 3) : '—', cb ? cls(cb.prem_pct) : '')}</div><div class="last-row">${kp('BTC DVOL', ok(db.dvol) ? db.dvol.toFixed(1) : '—')}</div><div class="last-row">${kp('L/S accts', ok(r.ls) ? r.ls.toFixed(2) : '—')}</div></div>`);
   }
   P_.insight = () => {
@@ -330,20 +330,20 @@
       <div class="fng"><i data-css="${css({ left: f.now + '%' })}"></i></div><div class="legend"><span>Yesterday ${f.yday}</span><span>Week ago ${f.week}</span><span>Month ago ${f.month}</span></div></div>` : empty('Fear & Greed unavailable');
     return `${head('Sentiment')}${P(gauge)}${sentiment()}
       ${head('Positioning', 'OKX · 1h')}
-      ${P(T([['Coin', 'l'], 'L/S accts', '24h', 'Top traders', 'Taker B/S', 'Liq 1h L', 'Liq 1h S'], ['BTC', 'ETH', 'SOL'].map(c => { const r = R[c] || {}, l = L[c] || {}; return `<tr><td class="n">${c}</td><td class="${r.ls > 1 ? 'up' : 'dn'}">${ok(r.ls) ? r.ls.toFixed(2) : '—'}</td><td>${spark(r.ls_hist)}</td><td>${ok(r.top_ls) ? r.top_ls.toFixed(2) : '—'}</td><td class="${cls((r.taker || 1) - 1)}">${ok(r.taker) ? r.taker.toFixed(2) : '—'}</td><td class="dn">${usd(l.long)}</td><td class="up">${usd(l.short)}</td></tr>`; }), 'Unavailable'))}
+      ${P(T([['Coin', 'l'], 'L/S', 'Top', 'Taker', 'Liq L', 'Liq S'], ['BTC', 'ETH', 'SOL'].map(c => { const r = R[c] || {}, l = L[c] || {}; return `<tr><td class="n">${c}</td><td class="${r.ls > 1 ? 'up' : 'dn'}">${ok(r.ls) ? r.ls.toFixed(2) : '—'}</td><td>${ok(r.top_ls) ? r.top_ls.toFixed(2) : '—'}</td><td class="${cls((r.taker || 1) - 1)}">${ok(r.taker) ? r.taker.toFixed(2) : '—'}</td><td class="dn">${usd(l.long)}</td><td class="up">${usd(l.short)}</td></tr>`; }), 'Unavailable'), 'xs')}
       ${head('Options & flows')}
       ${P(T([['Metric', 'l'], 'BTC', 'ETH'], [
-        `<tr><td class="n">DVOL (implied vol)</td><td>${ok((Db.BTC || {}).dvol) ? Db.BTC.dvol.toFixed(1) : '—'} ${spark((Db.BTC || {}).dvol_hist, 'g')}</td><td>${ok((Db.ETH || {}).dvol) ? Db.ETH.dvol.toFixed(1) : '—'} ${spark((Db.ETH || {}).dvol_hist, 'g')}</td></tr>`,
+        `<tr><td class="n">DVOL<small>implied vol</small></td><td>${ok((Db.BTC || {}).dvol) ? Db.BTC.dvol.toFixed(1) : '—'}</td><td>${ok((Db.ETH || {}).dvol) ? Db.ETH.dvol.toFixed(1) : '—'}</td></tr>`,
         `<tr><td class="n">Put/call OI</td><td>${ok((Db.BTC || {}).pc_oi) ? Db.BTC.pc_oi.toFixed(2) : '—'}</td><td>${ok((Db.ETH || {}).pc_oi) ? Db.ETH.pc_oi.toFixed(2) : '—'}</td></tr>`,
-        `<tr><td class="n">Put/call volume</td><td>${ok((Db.BTC || {}).pc_vol) ? Db.BTC.pc_vol.toFixed(2) : '—'}</td><td>${ok((Db.ETH || {}).pc_vol) ? Db.ETH.pc_vol.toFixed(2) : '—'}</td></tr>`]))}
-      ${P(T([['Market', 'l'], 'Value', 'Change'], [
+        `<tr><td class="n">Put/call volume</td><td>${ok((Db.BTC || {}).pc_vol) ? Db.BTC.pc_vol.toFixed(2) : '—'}</td><td>${ok((Db.ETH || {}).pc_vol) ? Db.ETH.pc_vol.toFixed(2) : '—'}</td></tr>`]), 'xs')}
+      ${P(T([['Market', 'l'], 'Value', 'Chg'], [
         cb ? `<tr><td class="n">Coinbase premium<small>BTC-USD vs Binance USDT</small></td><td class="${cls(cb.prem_usd)}">${cb.prem_usd >= 0 ? '+' : '−'}$${nu(Math.abs(cb.prem_usd))}</td><td class="${cls(cb.prem_pct)}">${pct(cb.prem_pct, 3)}</td></tr>` : '',
         `<tr><td class="n">Total crypto mcap</td><td>${usd(g.mcap)}</td><td class="${cls(g.mcap_chg)}">${pct(g.mcap_chg)}</td></tr>`,
         `<tr><td class="n">24h volume</td><td>${usd(g.vol)}</td><td class="mu">—</td></tr>`,
         `<tr><td class="n">BTC / ETH dominance</td><td>${ok(g.btc_dom) ? g.btc_dom.toFixed(1) : '—'}% / ${ok(g.eth_dom) ? g.eth_dom.toFixed(1) : '—'}%</td><td class="mu">—</td></tr>`,
-        `<tr><td class="n">Stablecoin supply</td><td>${usd(ll.stables)} ${spark(ll.stables_hist)}</td><td class="${cls(ll.stables_7d)}">${pct(ll.stables_7d)} 7d</td></tr>`,
-        `<tr><td class="n">DeFi TVL</td><td>${usd(ll.tvl)} ${spark(ll.tvl_hist)}</td><td class="${cls(ll.tvl_7d)}">${pct(ll.tvl_7d)} 7d</td></tr>`,
-        `<tr><td class="n">BTC fees (sat/vB)</td><td>${bc.fast ?? '—'} / ${bc.hour ?? '—'} / ${bc.eco ?? '—'}</td><td class="mu">fast/hour/eco</td></tr>`,
+        `<tr><td class="n">Stablecoins<small>7d chg</small></td><td>${usd(ll.stables)}</td><td class="${cls(ll.stables_7d)}">${pct(ll.stables_7d)}</td></tr>`,
+        `<tr><td class="n">DeFi TVL<small>7d chg</small></td><td>${usd(ll.tvl)}</td><td class="${cls(ll.tvl_7d)}">${pct(ll.tvl_7d)}</td></tr>`,
+        `<tr><td class="n">BTC fees<small>sat/vB fast/hr/eco</small></td><td>${bc.fast ?? '—'} / ${bc.hour ?? '—'} / ${bc.eco ?? '—'}</td><td class="mu">—</td></tr>`,
         `<tr><td class="n">BTC hashrate</td><td>${ok(bc.hashrate_eh) ? nf(bc.hashrate_eh, 0) + ' EH/s' : '—'}</td><td class="mu">—</td></tr>`].filter(Boolean)))}
       ${head('Trending', 'CoinGecko searches')}
       ${P(T([['Coin', 'l'], 'Rank', '24h'], (I.trending || []).map(t => `<tr><td class="n">${esc(t.s)}<small>${esc(t.n)}</small></td><td class="mu">${t.rank || '—'}</td><td class="${cls(t.chg)}">${pct(t.chg, 1)}</td></tr>`), 'Unavailable'))}

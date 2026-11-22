@@ -316,3 +316,6 @@ code{font:400 11px var(--mono);color:var(--gold2)}
 .amb{color:var(--amb)}.kx{font:400 10.5px/1 var(--mono);margin-top:3px}
 .fng{position:relative;height:4px;margin:14px 0 8px;border-radius:2px;background:linear-gradient(90deg,#b8605c,#a88a4f 45%,#8a8a93 50%,#5f9f80 75%,#5fb98e)}
 .fng i{position:absolute;top:-4px;width:2px;height:12px;margin-left:-1px;background:var(--tx);border-radius:1px}
+.xs .t{width:100%}.xs .t th:first-child,.xs .t td:first-child{position:sticky;left:0;z-index:1;background:var(--s1);box-shadow:1px 0 0 var(--line)}
+.xs .t td .spk{width:56px}
+.kpis .v small.fl{display:block;margin-top:4px;font:400 10.5px/1.2 var(--mono);color:var(--mu);white-space:normal}
