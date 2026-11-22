@@ -46,6 +46,7 @@
   const segHtml = (key, items, small) => `<div class="seg ${small ? 's2' : ''}" data-seg="${key}"><i class="seg-pill"></i>${items.map(([k, t, b]) => `<button data-sub="${k}" class="${sub[key] === k ? 'on' : ''}">${esc(t)}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('')}</div>`;
 
   /* ── derived ── */
+  const XU = () => ({esc, nf, pct, cls, px, P, head, src, spark, T, ext, empty, ago, tag, inrS, sInrS});
   const fx = () => (D && D.fx && D.fx.usdinr) || 84.5;
   const W = () => (D && D.world && !D.world.error) ? D.world : null;
   const desk = (k) => (D && D.desks && D.desks[k] && D.desks[k].state === 'ok') ? D.desks[k] : null;
@@ -140,6 +141,7 @@
   }
   const alertList = (al) => al.map(a => ext(a.href, `<i class="dot ${a.lvl}"></i><div class="t"><b>${esc(a.t)}</b><span>${esc(a.s || '')}</span></div>`, 'li' + (a.jump ? '" data-jump="' + a.jump : ''))).join('') || empty('All quiet');
 
+  const chiHome = () => (window.Chi ? (Chi.brief(D, XU()) + Chi.meter(D, XU())) : '');
   V.home = () => {
     const B = books(); const net = B.reduce((a, b) => a + (b.eq || 0), 0), start = B.reduce((a, b) => a + (b.start || 0), 0);
     const today = B.reduce((a, b) => a + (b.today || 0), 0), pnl = net - start, ppct = start ? pnl / start * 100 : 0; const lm = D.live_money || {};
@@ -151,7 +153,7 @@
     const mk = [['^NSEI', 'Nifty 50'], ['^NSEBANK', 'Bank Nifty'], ['^INDIAVIX', 'India VIX'], ['USDINR=X', 'USD/INR'], ['BZ=F', 'Brent'], ['GC=F', 'Gold'], ['ES=F', 'S&P fut'], ['^TNX', 'US 10Y']].map(([s, n]) => { const q = quote(s); return q ? `<tr><td class="n">${n}</td><td>${px(q.p)}</td><td class="${cls(q.cp)}">${pct(q.cp)}</td><td>${spark(q.sp)}</td></tr>` : ''; }).filter(Boolean);
     ['BTC', 'ETH'].forEach(c => { const x = Live.px[c] || ((D.crypto || {}).prices || {})[c]; if (x) mk.push(`<tr data-c="${c}"><td class="n">${c}</td><td class="px">${px(x.price)}</td><td class="chg ${cls(x.change_pct)}">${pct(x.change_pct)}</td><td><span class="dim">live</span></td></tr>`); });
     const al = alerts();
-    return `<div class="cols c3"><div>
+    return `${chiHome()}` + `<div class="cols c3"><div>
       <section class="p hero" id="hero">
         <div class="row1"><div><div class="lbl">Net worth · all books</div><div class="big">${inr(net)}</div></div>${tag('Paper', 'g')}</div>
         <div class="sub"><span>Today <b class="${cls(Math.round(today))}">${sInr(today)}</b></span><span>All-time <b class="${cls(pnl)}">${sInr(pnl)} · ${pct(ppct)}</b></span><span>Live <b class="gold">${inr(lm.used_inr || 0)} / ${inr(lm.cap_inr || 2000)}</b></span></div>
@@ -361,7 +363,9 @@
   /* ── world (merged from the World Monitor / WWAi command center) ── */
   const W_ = {};
   V.world = () => {
-    const w = W(); const segs = segHtml('world', [['intel', 'Brief'], ['monitor', 'Monitor'], ['feed', 'Events'], ['global', 'Global'], ['calendar', 'Calendar'], ['wnews', 'News']]);
+    const w = W(); const segs = segHtml('world', [['intel', 'Brief'], ['monitor', 'Monitor'], ['feed', 'Events'], ['global', 'Global'], ['calendar', 'Calendar'], ['wnews', 'News'], ['tv', 'Live TV'], ['weather', 'Weather']]);
+    if (sub.world === 'tv') return segs + (window.Chi ? Chi.tv(D, XU()) : '');
+    if (sub.world === 'weather') return segs + (window.Chi ? Chi.weather(D, XU()) : '');
     if (!w) return segs + P(empty('World Monitor is offline on the box (live-markets :8620). start.sh restarts it.'));
     return segs + (W_[sub.world] || W_.monitor)(w);
   };
@@ -598,7 +602,7 @@
   /* ── data loop ── */
   async function poll() {
     clearTimeout(pollT); if (!Vault.unlocked) return;
-    try { const d = await Vault.refresh(); if (d) { D = d; if (!(section === 'sports' && Live.sports[sub.sports])) render({ keepScroll: true, quiet: true }); else tape(); } }
+    try { const d = await Vault.refresh(); if (d) { D = d; if (window.Chi) Chi.watchPrices(D, toast); if (!(section === 'sports' && Live.sports[sub.sports])) render({ keepScroll: true, quiet: true }); else tape(); } }
     catch (e) { if (e.code === 'REKEY') { lock('Vault was re-keyed. Enter the new passphrase.'); return; } freshness(true); }
     pollT = setTimeout(poll, POLL_MS);
   }
@@ -657,10 +661,16 @@
   $('#peek').addEventListener('click', () => { const i = $('#pass'); const on = i.type === 'password'; i.type = on ? 'text' : 'password'; $('#peek').classList.toggle('on', on); H('light'); });
   $('#bio').addEventListener('click', () => { H('light'); NATIVE && NATIVE.bioUnlock(); });
   $('#lock').addEventListener('click', () => lock('Locked.'));
+  const lb=$('#langbtn'); if(lb) lb.addEventListener('click', () => { if(window.Chi){ Chi.toggleLang(); toast(Chi.t('lang')==='English'?'Hindi':'English'); render({keepScroll:true,quiet:true}); }});
+  const ab=$('#alertbtn'); if(ab) ab.addEventListener('click', () => { if(window.Chi) Chi.enableAlerts(toast); });
   $('#keysbtn').addEventListener('click', () => { H('light'); go('keys'); });
   $('#fresh').addEventListener('click', () => { H('light'); toast('Checking the vault…'); poll(); });
   $('#dock').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.go); });
   $('#view').addEventListener('click', async (e) => {
+    const tv = e.target.closest('[data-tv]');
+    if (tv) { e.preventDefault(); const st=$('#tv-stage'); if(st){ st.classList.remove('hidden'); st.innerHTML='<iframe src="'+tv.dataset.tv+'" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy" title="'+ (tv.dataset.title||'Live') +'"></iframe>'; } return; }
+    const pact = e.target.closest('[data-play]');
+    if (pact && window.Play) { e.preventDefault(); Play.handle(pact.dataset.play, D, toast); render({keepScroll:true,quiet:true}); return; }
     const kact = e.target.closest('[data-keys]');
     if (kact) {
       e.preventDefault();
