@@ -4,7 +4,7 @@
   const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const TCFG = window.VANTA_CFG || {}; const IDLE_MS = TCFG.idleMsTest || 10 * 60 * 1000, POLL_MS = TCFG.pollMsTest || 75 * 1000;
   let D = null, section = 'home', pollT = null, lastAct = Date.now(), unsub = null;
-  let keysReveal = null, keysBusy = false, keysAcked = {};
+  let keysReveal = null, keysBusy = false, keysAcked = {}, keysState = { phase: 'idle', text: '' }, keysNameDraft = '';
   const sub = { desks: 'eq', pulse: 'overview', world: 'intel', sports: 'home', fno: 'NIFTY', mov: 'NIFTY', std: 'nba', curve: 'intraday', feed: 'all', news: 'all', wnews: 'all' };
   const prevScore = {};
   const NATIVE = window.VantaNative || null;
@@ -507,34 +507,95 @@
 
   /* ── Sobot keys admin (Vanta only; behind the passphrase) ── */
   const keysIst = (ts) => ts ? ist(ts, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) + ' IST' : '—';
+  function keysNorm(name) {
+    return (name || '').trim().replace(/\s+/g, '-').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
+  }
+  function keysSet(phase, text) { keysState = { phase: phase, text: text || '' }; }
+  function keysApplyBox(box) {
+    if (!box || !box.nonce || keysAcked[box.nonce]) return false;
+    if (box.keys && D) { D.keys_admin = D.keys_admin || {}; D.keys_admin.keys = box.keys; }
+    if (box.op === 'issue' && box.ok && box.key) {
+      keysReveal = { nonce: box.nonce, name: box.name, key: box.key, path: box.path || '' };
+      keysSet('done', 'Key issued as “' + (box.name || '') + '”. Copy it now — it is shown once.');
+      if (D && D.keys_admin) {
+        const ks = D.keys_admin.keys || [];
+        if (!ks.some(k => k.name === box.name)) D.keys_admin.keys = ks.concat([{ name: box.name, issued: Math.floor(Date.now() / 1000) }]);
+      }
+      return true;
+    }
+    if (box.ok === false) { keysSet('error', box.error || 'The box rejected that command.'); return true; }
+    if (box.op === 'revoke' && box.ok) {
+      keysSet('done', 'Revoked ' + (box.name || '') + '. Remaining keys were rewrapped.');
+      if (D && D.keys_admin && D.keys_admin.keys) D.keys_admin.keys = D.keys_admin.keys.filter(k => k.name !== box.name);
+      return true;
+    }
+    return false;
+  }
   async function keysSend(cmd) {
     if (!Vault.unlocked) throw new Error('locked');
     cmd.nonce = cmd.nonce || ('k' + Math.random().toString(16).slice(2) + Date.now().toString(16));
     cmd.ts = Math.floor(Date.now() / 1000);
     const blob = await Vault.sealCmd(cmd);
     const bus = (D && D.keys_admin && D.keys_admin.bus) || '';
-    if (!bus) throw new Error('Command bus is not ready yet. Use the CLI on the box.');
-    const r = await fetch('https://ntfy.sh/' + encodeURIComponent(bus), {
-      method: 'POST', body: blob, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit',
-      headers: { 'Content-Type': 'text/plain' }
-    });
-    if (!r.ok) throw new Error('Could not reach the command bus (' + r.status + ')');
+    if (!bus) throw new Error('Command bus is not ready yet. Use the CLI on the box: python3 /workspace/deskapp/sobot_keys.py');
+    keysSet('sending', 'Sending the encrypted command…');
+    let r;
+    try {
+      r = await fetch('https://ntfy.sh/' + encodeURIComponent(bus), {
+        method: 'POST', body: blob, cache: 'no-store', referrerPolicy: 'no-referrer', credentials: 'omit',
+        headers: { 'Content-Type': 'text/plain' }
+      });
+    } catch (e) {
+      throw new Error('The command bus was blocked or unreachable from this browser (ntfy.sh). Try another network, or run python3 /workspace/deskapp/sobot_keys.py on the box.');
+    }
+    if (!r.ok) throw new Error('Could not reach the command bus (' + r.status + '). Try again, or use the CLI on the box.');
+    keysSet('waiting', 'Command sent. Waiting for the box…');
     return cmd.nonce;
   }
-
-  async function keysWait() {
-    for (let i = 0; i < 24; i++) {
-      await new Promise(r => setTimeout(r, 2500));
+  async function keysPollReply(nonce) {
+    const bus = (D && D.keys_admin && D.keys_admin.bus) || '';
+    if (!bus || !Vault.openReply) return null;
+    const r = await fetch('https://ntfy.sh/' + encodeURIComponent(bus) + '/json?poll=1&since=30m', { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+    if (!r.ok) throw new Error('reply poll ' + r.status);
+    const txt = await r.text();
+    const lines = txt.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      let ev; try { ev = JSON.parse(line); } catch (e) { continue; }
+      const msg = ev.message || '';
+      if (typeof msg !== 'string' || msg.indexOf('VREP1.') !== 0) continue;
       try {
-        const d = await Vault.refresh();
-        if (d) D = d;
-        keysTakeOutbox();
-        const box = (D && D.keys_admin && D.keys_admin.outbox) || null;
-        render({ keepScroll: true, quiet: true });
-        if (keysReveal && keysReveal.key) return;
-        if (box && (box.op === 'revoke' || box.ok === false)) return;
+        const box = await Vault.openReply(msg);
+        if (box && box.nonce === nonce) return box;
       } catch (e) {}
     }
+    return null;
+  }
+  async function keysWait(nonce) {
+    const t0 = Date.now();
+    let lastVault = 0;
+    while (Date.now() - t0 < 45000) {
+      try {
+        const box = await keysPollReply(nonce);
+        if (box && keysApplyBox(box)) { render({ keepScroll: true, quiet: true }); return; }
+      } catch (e) {
+        keysSet('waiting', 'Still waiting for the box… (' + (e.message || 'retrying') + ')');
+      }
+      if (Date.now() - lastVault > 8000) {
+        lastVault = Date.now();
+        try {
+          const d = await Vault.refresh();
+          if (d) D = d;
+          keysTakeOutbox();
+          const box = (D && D.keys_admin && D.keys_admin.outbox) || null;
+          if (box && box.nonce === nonce && keysApplyBox(box)) { render({ keepScroll: true, quiet: true }); return; }
+        } catch (e) {}
+      }
+      render({ keepScroll: true, quiet: true });
+      await new Promise(r => setTimeout(r, 1200));
+    }
+    keysSet('error', 'No reply from the box after 45 seconds. Stay on this screen and try again, or run python3 /workspace/deskapp/sobot_keys.py issue|revoke on the box.');
   }
   function keysTakeOutbox() {
     const box = (D && D.keys_admin && D.keys_admin.outbox) || null;
@@ -548,8 +609,9 @@
     const A = (D && D.keys_admin) || {};
     const rows = (A.keys || []).slice();
     const box = A.outbox;
-    const err = (box && box.ok === false && box.error && !keysAcked[box.nonce]) ? box.error : (D && D.keys_admin_error ? 'Key list unavailable right now.' : '');
-    const okmsg = (box && box.ok && box.op === 'revoke' && !keysAcked[box.nonce]) ? ('Revoked ' + (box.name || '') + '. Remaining keys were rewrapped.') : '';
+    let err = (keysState.phase === 'error' && keysState.text) ? keysState.text : ((box && box.ok === false && box.error && !keysAcked[box.nonce]) ? box.error : (D && D.keys_admin_error ? 'Key list unavailable right now.' : ''));
+    const okmsg = (keysState.phase === 'done' && keysState.text) ? keysState.text : ((box && box.ok && box.op === 'revoke' && !keysAcked[box.nonce]) ? ('Revoked ' + (box.name || '') + '. Remaining keys were rewrapped.') : '');
+    const waitmsg = (keysState.phase === 'sending' || keysState.phase === 'waiting') ? keysState.text : '';
     const list = rows.length
       ? rows.map(k => `<div class="rowk"><div><div class="nm">${esc(k.name)}</div><div class="meta">${esc(keysIst(k.issued))}${k.id ? ' · ' + esc(k.id) : ''}</div></div><button type="button" class="act danger" data-keys="revoke" data-name="${esc(k.name)}">Revoke</button></div>`).join('')
       : `<div class="empty">No Sobot login keys issued yet.</div>`;
@@ -560,11 +622,12 @@
     const busOk = !!A.bus;
     return `<div class="keys">
       ${head('Sobot keys', 'issue and revoke')}
-      ${P(`<p class="lead">These keys open Sobot, not this vault. Issue and revoke run on the box. Your command is encrypted with the same key as this vault and sent over a private bus. A newly issued key is shown once, here only.</p>`)}
+      ${P(`<p class="lead">These keys open Sobot, not this vault. Issue and revoke run on the box. Names may include spaces (they become dashes). Your command is encrypted and sent over a private bus; the box replies on the same bus, then the vault also updates. A newly issued key is shown once, here only.</p>`)}
       ${once}
       ${err ? `<p class="msg err">${esc(err)}</p>` : ''}
       ${okmsg ? `<p class="msg">${esc(okmsg)}</p>` : ''}
-      ${P(`<div class="issue"><input id="keys-name" type="text" maxlength="32" autocapitalize="off" spellcheck="false" placeholder="Name, e.g. ananya" aria-label="Key name"${keysBusy ? ' disabled' : ''}><button type="button" class="act" data-keys="issue"${keysBusy ? ' disabled' : ''}>Issue</button></div>`)}
+      ${waitmsg ? `<p class="msg wait" aria-live="polite">${esc(waitmsg)}</p>` : ''}
+      ${P(`<div class="issue"><input id="keys-name" type="text" maxlength="32" autocapitalize="off" spellcheck="false" placeholder="Name, e.g. ananya (spaces become dashes)" aria-label="Key name" value="${esc(keysNameDraft)}"${keysBusy ? ' disabled' : ''}><button type="button" class="act" data-keys="issue"${keysBusy ? ' disabled' : ''}>${keysBusy ? 'Working…' : 'Issue'}</button></div>`)}
       ${P(list)}
       ${P(`<p class="lead">${busOk ? 'The box poller is listening. You can also run this on the box:' : 'The command bus is not in the vault yet. Until the next vault publish, use the CLI on the box:'} <span class="meta">python3 /workspace/deskapp/sobot_keys.py issue|revoke|list</span></p>`)}
       ${src('AES-256-GCM commands · keys never leave the box except this one-time reveal')}
@@ -617,7 +680,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Vault.unlocked && Date.now() - lastAct >= IDLE_MS) lock('Locked after 10 minutes idle.'); });
 
   function lock(msg) {
-    Vault.lock(); Live.stop(); unsub && unsub(); clearTimeout(pollT); D = null; keysReveal = null; keysBusy = false; keysAcked = {};
+    Vault.lock(); Live.stop(); unsub && unsub(); clearTimeout(pollT); D = null; keysReveal = null; keysBusy = false; keysAcked = {}; keysState = { phase: 'idle', text: '' }; keysNameDraft = '';
     $('#view').innerHTML = ''; $('#tape').innerHTML = ''; $('#tape').dataset.h = ''; for (const k in prevScore) delete prevScore[k];
     const app = $('#app'); app.classList.add('hidden'); app.classList.remove('reveal'); app.setAttribute('aria-hidden', 'true');
     const g = $('#gate'); g.classList.remove('hidden', 'leaving', 'working', 'bad'); $('#pass').value = ''; gateMsg(msg || ''); H('medium'); setupBio();
@@ -677,20 +740,23 @@
       const act = kact.dataset.keys;
       try {
         if (act === 'issue') {
-          const name = (($('#keys-name') || {}).value || '').trim();
-          if (!name) { toast('Enter a short name'); return; }
+          const raw = (($('#keys-name') || {}).value || '').trim();
+          keysNameDraft = raw;
+          const name = keysNorm(raw);
+          if (!name) { keysSet('error', 'Enter a short name (letters, numbers, dash or underscore). Spaces become dashes.'); render({ keepScroll: true, quiet: true }); return; }
+          if (name !== raw) keysSet('waiting', 'Using the name “' + name + '” (spaces become dashes).');
           keysBusy = true; render({ keepScroll: true, quiet: true });
-          await keysSend({ op: 'issue', name });
+          const nonce = await keysSend({ op: 'issue', name });
           toast('Issue sent. Waiting for the box…');
-          await keysWait();
+          await keysWait(nonce);
           keysBusy = false; render({ keepScroll: true, quiet: true });
         } else if (act === 'revoke') {
           const name = kact.dataset.name;
           if (!name || !confirm('Revoke “' + name + '”? The data key will rotate and that login will stop working.')) return;
-          keysBusy = true; render({ keepScroll: true, quiet: true });
-          await keysSend({ op: 'revoke', name });
+          keysBusy = true; keysSet('sending', 'Sending revoke for “' + name + '”…'); render({ keepScroll: true, quiet: true });
+          const nonce = await keysSend({ op: 'revoke', name });
           toast('Revoke sent. Waiting for the box…');
-          await keysWait();
+          await keysWait(nonce);
           keysBusy = false; render({ keepScroll: true, quiet: true });
         } else if (act === 'copy') {
           if (keysReveal && keysReveal.key && navigator.clipboard) {
@@ -709,6 +775,7 @@
         }
       } catch (err) {
         keysBusy = false;
+        keysSet('error', err.message || 'Command failed');
         toast(err.message || 'Command failed');
         render({ keepScroll: true, quiet: true });
       }

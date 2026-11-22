@@ -90,6 +90,14 @@
       const out = new Uint8Array(iv.length + ct.length); out.set(iv, 0); out.set(ct, iv.length);
       return 'VCMD1.' + b64e(out);
     },
+    async openReply(blob) {
+      if (!key) throw new Error('locked');
+      if (!blob || blob.indexOf('VREP1.') !== 0) throw new Error('not a reply');
+      const b = b64u(blob.slice(6));
+      const iv = b.slice(0, 12), ct = b.slice(12);
+      const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode('VREP1') }, key, ct);
+      return JSON.parse(new TextDecoder().decode(raw));
+    },
     lock() { key = null; saltB64 = null; lastBlob = null; etag = null; },
   };
   Object.freeze(Vault);
