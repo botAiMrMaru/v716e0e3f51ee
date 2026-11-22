@@ -25,9 +25,28 @@
 
   const t = (k) => (I18N[lang] && I18N[lang][k]) || (I18N.en[k] || k);
 
-  const yt = (id, mute, play) => id
-    ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=${play ? 1 : 0}&mute=${mute ? 1 : 0}&playsinline=1&rel=0&modestbranding=1`
-    : '';
+
+  const yt = (id, mute, play) => {
+    if (!id) return '';
+    const origin = encodeURIComponent(location.origin || '');
+    return 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(id)
+      + '?autoplay=' + (play ? 1 : 0) + '&mute=' + (mute ? 1 : 0)
+      + '&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=' + origin;
+  };
+
+  const decodeEnt = (s) => String(s == null ? '' : s)
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
+
+  const thumbUrl = (id) => 'https://i.ytimg.com/vi/' + encodeURIComponent(id) + '/hqdefault.jpg';
+
+  function fallbackHtml(u, id, name) {
+    const n = u.esc(decodeEnt(name || 'Live'));
+    return `<div class="live-fallback"><img src="${thumbUrl(id)}" alt="" decoding="async" width="480" height="270">`
+      + `<a class="live-open" href="https://www.youtube.com/watch?v=${u.esc(id)}" target="_blank" rel="noopener noreferrer">Open on YouTube</a></div>`;
+  }
 
   function liveList(D, group) {
     const C = (D && D.chi && D.chi.tv) || {};
@@ -39,41 +58,132 @@
     if (!list.length) return '';
     const asof = ((D && D.chi && D.chi.tv) || {}).ist || '';
     const tiles = list.map((v, i) => {
-      const eager = i < 6;
-      const src = yt(v.v, true, eager);
-      return `<div class="live-tile" data-live-id="${u.esc(v.v)}">
-        <div class="live-frame">${eager ? `<iframe src="${src}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="${u.esc(v.name || 'Live')}"></iframe>` : `<button type="button" class="live-ph" data-live-load="${u.esc(v.v)}" aria-label="Load ${u.esc(v.name || 'live stream')}"></button>`}</div>
-        <div class="live-bar"><span class="live-pip" aria-hidden="true"></span><span class="nm">${u.esc(v.name || '')}</span>
-          <button type="button" class="live-mute on" data-live-toggle="${u.esc(v.v)}" aria-label="Sound for ${u.esc(v.name || '')}">Sound</button></div>
+      const eager = i < 6 && v.embed !== false;
+      const name = decodeEnt(v.name || '');
+      const title = decodeEnt(v.title || name);
+      const src = yt(v.v, true, true);
+      const frame = v.embed === false
+        ? fallbackHtml(u, v.v, name)
+        : (eager
+          ? `<iframe src="${src}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="${u.esc(name || 'Live')}"></iframe>`
+          : `<button type="button" class="live-ph" data-live-load="${u.esc(v.v)}" aria-label="Load ${u.esc(name || 'live stream')}"></button>`);
+      return `<div class="live-tile" data-live-id="${u.esc(v.v)}" data-live-name="${u.esc(name)}"${v.embed === false ? ' data-live-fallback="1"' : ''}>
+        <div class="live-frame">${frame}</div>
+        <div class="live-bar"><span class="live-pip" aria-hidden="true"></span><span class="nm" title="${u.esc(title)}">${u.esc(name)}</span>
+          ${v.embed === false ? '' : `<button type="button" class="live-mute on" data-live-toggle="${u.esc(v.v)}" aria-label="Sound for ${u.esc(name)}">Sound</button>`}</div>
       </div>`;
     }).join('');
     const title = (opts && opts.title) || 'Live now';
     return `${u.head(title, asof ? ('verified ' + asof) : 'muted autoplay')}
       ${u.P(`<p class="lead">${t('tvHint')}</p><div class="live-grid" data-live-group="${u.esc(group)}">${tiles}</div>`)}
-      ${u.src('Official YouTube live broadcasts, checked every few minutes. Streams that are not live are dropped. Autoplay is muted; tap one tile for sound.')}`;
+      ${u.src('Official YouTube live broadcasts, checked every few minutes. Streams that are not live are dropped. Autoplay is muted; tap one tile for sound. If a channel blocks embeds, a thumbnail opens the official YouTube page.')}`;
   }
 
   function afterLive(root) {
     if (!root) return;
+    if (window.Teach && Teach.hideBehind) Teach.hideBehind(!!root.querySelector('.live-grid'));
+
+    const cmd = (iframe, func, args) => {
+      try {
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: func, args: args || [] }), '*');
+        }
+      } catch (e) {}
+    };
+    const listen = (iframe) => {
+      try {
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1 }), '*');
+        }
+      } catch (e) {}
+    };
+    const kick = (iframe) => {
+      if (!iframe) return;
+      listen(iframe);
+      cmd(iframe, 'mute');
+      cmd(iframe, 'playVideo');
+    };
+    const fallback = (tile) => {
+      if (!tile || tile.dataset.liveFallback === '1') return;
+      const id = tile.dataset.liveId;
+      const name = tile.dataset.liveName || 'Live';
+      const frame = tile.querySelector('.live-frame');
+      if (!id || !frame) return;
+      tile.dataset.liveFallback = '1';
+      const u = { esc: (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])) };
+      frame.innerHTML = fallbackHtml(u, id, name);
+      const btn = tile.querySelector('[data-live-toggle]');
+      if (btn) btn.remove();
+    };
     const load = (tile, id, mute) => {
-      if (!tile || !id) return;
+      if (!tile || !id || tile.dataset.liveFallback === '1') return;
       const frame = tile.querySelector('.live-frame');
       if (!frame) return;
+      delete tile.dataset.liveReady;
       frame.innerHTML = `<iframe src="${yt(id, mute, true)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="Live"></iframe>`;
+      const iframe = frame.querySelector('iframe');
       const btn = tile.querySelector('[data-live-toggle]');
-      if (btn) { btn.classList.toggle('on', !!mute); btn.textContent = mute ? 'Sound' : 'On'; }
+      if (btn) { btn.hidden = false; btn.classList.toggle('on', !!mute); btn.textContent = mute ? 'Sound' : 'On'; }
+      if (iframe) {
+        iframe.addEventListener('load', () => { kick(iframe); setTimeout(() => kick(iframe), 350); setTimeout(() => kick(iframe), 1200); });
+      }
     };
-    root.querySelectorAll('[data-live-load]').forEach(ph => {
-      const tile = ph.closest('.live-tile');
-      if (!tile) return;
+
+    if (!window.__sobotLiveMsg) {
+      window.__sobotLiveMsg = true;
+      window.addEventListener('message', (e) => {
+        const o = String(e.origin || '');
+        if (o.indexOf('youtube.com') === -1) return;
+        let d = e.data;
+        if (typeof d === 'string') { try { d = JSON.parse(d); } catch (err) { return; } }
+        if (!d) return;
+        const frames = document.querySelectorAll('.live-frame iframe');
+        let iframe = null;
+        frames.forEach((f) => { if (f.contentWindow === e.source) iframe = f; });
+        if (!iframe) return;
+        const tile = iframe.closest('.live-tile');
+        if (!tile) return;
+        const ev = d.event || '';
+        const info = d.info;
+        const code = (typeof info === 'number') ? info : (info && (info.error || info.playbackError));
+        const bad = [2, 5, 100, 101, 150, 153];
+        if (ev === 'onError' || ev === 'error' || (typeof code === 'number' && bad.indexOf(code) !== -1)) {
+          fallback(tile);
+          return;
+        }
+        if (ev === 'onReady' || ev === 'initialDelivery' || ev === 'infoDelivery' || ev === 'apiInfoDelivery') {
+          tile.dataset.liveReady = '1';
+          const muted = !tile.querySelector('.live-mute') || tile.querySelector('.live-mute').classList.contains('on');
+          if (muted) cmd(iframe, 'mute');
+          cmd(iframe, 'playVideo');
+        }
+      });
+    }
+
+    root.querySelectorAll('.live-tile').forEach((tile) => {
+      if (tile._liveIo) return;
       const io = new IntersectionObserver((ents) => {
-        ents.forEach(en => { if (en.isIntersecting) { load(tile, ph.dataset.liveLoad, true); io.disconnect(); } });
-      }, { rootMargin: '120px' });
-      io.observe(ph);
+        ents.forEach((en) => {
+          if (!en.isIntersecting) return;
+          const ph = tile.querySelector('[data-live-load]');
+          if (ph) load(tile, ph.dataset.liveLoad, true);
+          const iframe = tile.querySelector('iframe');
+          if (iframe) kick(iframe);
+        });
+      }, { threshold: 0.2, rootMargin: '80px' });
+      io.observe(tile);
+      tile._liveIo = io;
+      const iframe = tile.querySelector('iframe');
+      if (iframe) {
+        iframe.addEventListener('load', () => { kick(iframe); setTimeout(() => kick(iframe), 350); setTimeout(() => kick(iframe), 1200); });
+      }
     });
+
     if (root.dataset.liveBound) return;
     root.dataset.liveBound = '1';
     root.addEventListener('click', (e) => {
+      const open = e.target.closest('.live-open');
+      if (open) return;
       const btn = e.target.closest('[data-live-toggle], [data-live-load]');
       if (!btn) return;
       e.preventDefault();
@@ -81,16 +191,20 @@
       const id = btn.dataset.liveToggle || btn.dataset.liveLoad;
       if (btn.dataset.liveLoad) { load(tile, id, true); return; }
       const turnOn = btn.classList.contains('on');
-      root.querySelectorAll('.live-tile').forEach(t => {
+      root.querySelectorAll('.live-tile').forEach((t) => {
         const tid = t.dataset.liveId;
-        if (!tid || !t.querySelector('iframe')) return;
-        load(t, tid, !(turnOn && tid === id));
+        const iframe = t.querySelector('iframe');
+        if (!tid || !iframe || t.dataset.liveFallback === '1') return;
+        const muteThis = !(turnOn && tid === id);
+        const b = t.querySelector('[data-live-toggle]');
+        if (b) { b.classList.toggle('on', muteThis); b.textContent = muteThis ? 'Sound' : 'On'; }
+        if (muteThis) cmd(iframe, 'mute'); else cmd(iframe, 'unMute');
+        cmd(iframe, 'playVideo');
       });
     });
   }
 
   function tv(D, u) {
-    const C = (D && D.chi && D.chi.tv) || {};
     const news = liveGrid(D, u, 'news', { title: 'News' });
     const war = liveGrid(D, u, 'war', { title: 'World & war' });
     const sports = liveGrid(D, u, 'sports', { title: 'Sports' });
