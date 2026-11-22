@@ -341,3 +341,10 @@ code{font:400 11px var(--mono);color:var(--gold2)}
 .keys .msg{font:400 13px/1.5 var(--sans);color:var(--tx2)}
 .keys .msg.err{color:#e8a0a0}
 .keys .empty{color:var(--dim);font:400 13px/1.5 var(--sans)}
+
+.news-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.news-row .nm{font:500 13px/1.4 var(--sans)}
+.news-row .meta{font:400 11px/1.4 var(--mono);color:var(--dim)}
+.rowk{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
+.rowk .nm{font:500 14px/1.2 var(--sans)}
+.rowk .meta{font:400 11px/1.4 var(--mono);color:var(--dim)}

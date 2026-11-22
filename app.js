@@ -228,7 +228,8 @@
 
   /* ── markets ── */
   const P_ = {};
-  V.pulse = () => segHtml('pulse', [['overview', 'Overview'], ['fno', 'F&O'], ['flows', 'Flows'], ['breakouts', 'Breakouts'], ['crypto', 'Crypto'], ['insight', 'Sentiment'], ['news', 'News']]) + (P_[sub.pulse] || P_.overview)();
+  P_.commodities = () => MarketsX.commodities(D, {esc, nf, pct, cls, px, P, head, src, spark, T, ext, empty, ago, tag});
+  V.pulse = () => segHtml('pulse', [['overview', 'Overview'], ['fno', 'F&O'], ['flows', 'Flows'], ['breakouts', 'Breakouts'], ['crypto', 'Crypto'], ['commodities', 'Commodities'], ['insight', 'Sentiment'], ['news', 'News']]) + (P_[sub.pulse] || P_.overview)();
   P_.overview = () => {
     const M = D.markets || {}, w = W(); const ses = M.session || {}; const rc = M.recap || {};
     const ind = (w && w.quotes.india || []).filter(q => q.p != null);
