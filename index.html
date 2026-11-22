@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://api.github.com https://gist.githubusercontent.com https://site.api.espn.com https://site.web.api.espn.com https://data-api.binance.vision wss://data-stream.binance.vision; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https://a.espncdn.com; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://api.github.com https://gist.githubusercontent.com https://site.api.espn.com https://site.web.api.espn.com https://data-api.binance.vision wss://data-stream.binance.vision; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
 <meta name="googlebot" content="noindex,nofollow">
@@ -23,7 +23,9 @@
 <link rel="stylesheet" href="vanta.css">
 </head>
 <body>
+<div id="aurora" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i><i class="a4"></i><i class="a5"></i></div>
 <div id="grain" aria-hidden="true"></div>
+<canvas id="confetti" aria-hidden="true"></canvas>
 
 <section id="gate" class="gate" aria-label="Unlock">
   <div class="aperture" aria-hidden="true">

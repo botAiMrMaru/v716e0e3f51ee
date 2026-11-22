@@ -16,7 +16,7 @@
 
   const comp = (c) => { const t = c.team || {}, a = c.athlete || {};
     return { name: t.displayName || a.displayName || c.displayName || c.name || t.abbreviation || '', abbr: t.abbreviation || c.abbreviation || a.shortName || '',
-      score: c.score != null ? (typeof c.score === 'object' ? (c.score.displayValue || '') : String(c.score)) : (c.displayScore || ''), home: c.homeAway === 'home', winner: !!c.winner }; };
+      score: c.score != null ? (typeof c.score === 'object' ? (c.score.displayValue || '') : String(c.score)) : (c.displayScore || ''), home: c.homeAway === 'home', winner: !!c.winner, logo: t.logo || (a.flag && a.flag.href) || '', color: t.color || '' }; };
 
   function parseEspn(e, sport, league) {
     const st = (e.status && e.status.type) || {}; const state = (st.state || 'pre').toLowerCase();
@@ -35,7 +35,7 @@
       let state = /scheduled to begin|starts at|yet to begin/i.test(det) ? 'pre' : (low === 'in' || low === 'live' || low.includes('progress')) ? 'in' : (['post', 'final', 'closed', 'result'].includes(low) ? 'post' : 'pre');
       out.push({ id: 'cricket:' + e.id, sport: 'cricket', league: lg.name || lg.shortName || 'Cricket', name: e.shortName || e.name || '', state, detail: det, clock: '',
         start: e.date ? Date.parse(e.date) / 1000 : null, link: e.link || '',
-        competitors: (e.competitors || []).map(c => ({ name: c.displayName || c.name || c.abbreviation || '', abbr: c.abbreviation || '', score: c.score || '', home: c.homeAway === 'home', winner: !!c.winner })) });
+        competitors: (e.competitors || []).map(c => ({ name: c.displayName || c.name || c.abbreviation || '', abbr: c.abbreviation || '', score: c.score || '', home: c.homeAway === 'home', winner: !!c.winner, logo: c.logo || '', color: c.color || '' })) });
     }
     return out;
   }

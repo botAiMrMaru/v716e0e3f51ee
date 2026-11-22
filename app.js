@@ -52,14 +52,15 @@
     const base = opts.base; let lo = Math.min(...ys, base ?? Infinity), hi = Math.max(...ys, base ?? -Infinity); if (hi === lo) { hi += 1; lo -= 1; }
     const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
     const N = pts.length - 1; const X = (x, i) => i / (N || 1) * (w - 12) + 4, Y = (y) => h - 10 - (y - lo) / (hi - lo) * (h - 24);
-    const up = ys[ys.length - 1] >= (base ?? ys[0]); const col = up ? '184,255,60' : '255,77,109';
+    const up = ys[ys.length - 1] >= (base ?? ys[0]); const c1 = opts.c1 || (up ? '#34f5a4' : '#ff4d7a'), c2 = opts.c2 || (up ? '#7cf3ff' : '#ff3dcb'); const col = hexRgb(c1);
     if (base != null) { g.setLineDash([3, 5]); g.strokeStyle = 'rgba(255,255,255,.18)'; g.lineWidth = 1; g.beginPath(); g.moveTo(0, Y(base)); g.lineTo(w, Y(base)); g.stroke(); g.setLineDash([]); }
     const path = () => { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(p[0], i), Y(p[1])) : g.moveTo(X(p[0], i), Y(p[1]))); };
-    const grd = g.createLinearGradient(0, 0, 0, h); grd.addColorStop(0, `rgba(${col},.32)`); grd.addColorStop(1, `rgba(${col},0)`);
+    const grd = g.createLinearGradient(0, 0, 0, h); grd.addColorStop(0, `rgba(${col},.42)`); grd.addColorStop(.6, `rgba(${hexRgb(c2)},.10)`); grd.addColorStop(1, `rgba(${col},0)`);
     path(); g.lineTo(X(0, N), h); g.lineTo(X(0, 0), h); g.closePath(); g.fillStyle = grd; g.fill();
-    path(); g.strokeStyle = `rgb(${col})`; g.lineWidth = 2; g.lineJoin = 'round'; g.shadowColor = `rgba(${col},.6)`; g.shadowBlur = 10; g.stroke(); g.shadowBlur = 0;
+    const lg = g.createLinearGradient(0, 0, w, 0); lg.addColorStop(0, c2); lg.addColorStop(1, c1); path(); g.strokeStyle = lg; g.lineWidth = opts.lw || 2.4; g.lineJoin = 'round'; g.lineCap = 'round'; g.shadowColor = `rgba(${col},.7)`; g.shadowBlur = 14; g.stroke(); g.shadowBlur = 0;
     const lx = X(0, N), ly = Y(ys[ys.length - 1]); g.fillStyle = `rgb(${col})`; g.beginPath(); g.arc(lx, ly, 3.5, 0, 7); g.fill();
     g.strokeStyle = `rgba(${col},.35)`; g.beginPath(); g.arc(lx, ly, 8, 0, 7); g.stroke();
+    if (opts.spark) { cv.classList.add('drawn'); return; }
     const snap = g.getImageData(0, 0, cv.width, cv.height);
     // scrub
     const lab = opts.scrub; let lastI = -1;
@@ -73,6 +74,15 @@
     const end = () => { g.putImageData(snap, 0, 0); lab && lab.classList.remove('on'); };
     cv.onpointerdown = (e) => { move(e); }; cv.onpointermove = (e) => { if (e.pointerType === 'mouse' || e.buttons) move(e); }; cv.onpointerleave = end; cv.onpointerup = () => setTimeout(end, 900);
   }
+
+  const hexRgb = (h) => { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(x => x + x).join(''); const n = parseInt(h, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(','); };
+  const ACC = { eq: ['#3d8bff', '#7cc4ff'], opt: ['#ff3dcb', '#ff9bf0'], meme: ['#b8ff3c', '#9b5cff'], gold: ['#ffc53d', '#ff8a3d'] };
+  const SPC = { cricket: '#19e3c4', soccer: '#2ee66b', nba: '#ff8a1f', nfl: '#ff3b3b', nhl: '#8fe3ff', tennis: '#ffe23d', f1: '#e10600', ncaaf: '#ff6b3d', ncaab: '#ff9f43', mma: '#ff2e63', golf: '#7bd88f', mlb: '#4fa3ff' };
+  const spc = (k) => SPC[k] ? 'sp-' + k : 'sp-other';
+  function confetti() { const cv = $('#confetti'); if (!cv || matchMedia('(prefers-reduced-motion:reduce)').matches) return; const dpr = devicePixelRatio || 1; cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
+    const cols = ['#34f5a4', '#7cf3ff', '#8b7bff', '#ff6ad5', '#ffc53d', '#b8ff3c']; const P = Array.from({ length: 140 }, () => ({ x: innerWidth / 2 + (Math.random() - .5) * 80, y: 170, vx: (Math.random() - .5) * 11, vy: -Math.random() * 12 - 4, s: 4 + Math.random() * 6, r: Math.random() * 6, vr: (Math.random() - .5) * .3, c: cols[(Math.random() * cols.length) | 0] }));
+    let f = 0; const step = () => { g.clearRect(0, 0, innerWidth, innerHeight); P.forEach(p => { p.vy += .32; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.r += p.vr; g.save(); g.translate(p.x, p.y); g.rotate(p.r); g.fillStyle = p.c; g.globalAlpha = Math.max(0, 1 - f / 140); g.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2); g.restore(); }); if (++f < 150) requestAnimationFrame(step); else g.clearRect(0, 0, innerWidth, innerHeight); }; requestAnimationFrame(step); H('success'); }
+  let celebrated = false;
 
   /* ── count-up ── */
   function countUp(el, to, fmt, ms = 900) {
@@ -89,25 +99,26 @@
     const today = B.reduce((a, b) => a + (b.today || 0), 0), pnl = net - start, ppct = start ? pnl / start * 100 : 0;
     const lm = D.live_money || {};
     const maxPct = Math.max(5, ...B.map(b => Math.abs(b.pct || 0)));
-    let cells = B.map((b, i) => `<a class="cell tap h2 w2" data-jump="desks:${b.k}" data-css="${css({ background: `linear-gradient(150deg,${tint(b.pct, maxPct)},rgba(255,255,255,.02))`, 'animation-delay': i * 60 + 'ms' })}"><b>${b.tag}</b><span class="${cls(b.pct)}">${pct(b.pct)}<br><small class="muted">${inrS(b.pnl)}</small></span></a>`);
+    let cells = B.map((b, i) => `<a class="cell tap h2 w2 book-tile acc-${b.k}" data-jump="desks:${b.k}" data-css="${css({ background: `linear-gradient(150deg,${ACC[b.k][0]}55,${tint(b.pct, maxPct)} 55%,rgba(255,255,255,.02))`, 'animation-delay': i * 60 + 'ms' })}"><b>${b.tag}</b><span class="${cls(b.pct)}">${pct(b.pct)}<br><small class="muted">${inrS(b.pnl)}</small></span><i class="bar2"></i></a>`);
     const und = [].concat(...['eq', 'opt'].map(k => (desk(k) || {}).per_underlying || [])).reduce((m, a) => { const x = m[a.u] || (m[a.u] = { u: a.u, pnl: 0, n: 0 }); x.pnl += a.pnl; x.n += a.n; return m; }, {});
     const U = Object.values(und).sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl)).slice(0, 10); const mu = Math.max(1, ...U.map(u => Math.abs(u.pnl)));
     cells = cells.concat(U.map((u, i) => `<div class="cell ${i < 2 ? 'w2' : ''}" data-css="${css({ background: `linear-gradient(150deg,${tint(u.pnl, mu)},rgba(255,255,255,.02))`, 'animation-delay': (180 + i * 40) + 'ms' })}"><b>${esc(u.u)}</b><span class="${cls(u.pnl)}">${inrS(u.pnl)}</span></div>`));
     // daily strip
     const days = {}; B.forEach(b => (b.d.daily || []).forEach(x => { days[x.d] = (days[x.d] || 0) + (b.k === 'meme' ? memeInr(x.chg) : x.chg); }));
     const DK = Object.keys(days).sort().slice(-12); const md = Math.max(1, ...DK.map(k => Math.abs(days[k])));
-    const strip = DK.map((k, i) => `<div><i data-css="${css({ height: Math.max(3, Math.abs(days[k]) / md * 70) + 'px', background: days[k] >= 0 ? 'var(--up)' : 'var(--down)', opacity: days[k] ? 1 : .25, 'animation-delay': i * 40 + 'ms' })}"></i><span>${esc(k.slice(8))}</span></div>`).join('');
+    const strip = DK.map((k, i) => `<div><i class="${days[k] < 0 ? 'neg' : ''}" data-css="${css({ height: Math.max(3, Math.abs(days[k]) / md * 70) + 'px', opacity: days[k] ? 1 : .25, 'animation-delay': i * 40 + 'ms' })}"></i><span>${esc(k.slice(8))}</span></div>`).join('');
     const al = alerts();
     return `<div class="wide"><div>
-      <section class="card glow hero">
+      <section class="card glow hero acc-aur" id="hero">
         <span class="paper">PAPER</span>
         <div class="lbl">Net worth · all books</div>
-        <div class="big num" id="nw">${inr(net)}</div>
+        <div class="big num grad-aur" id="nw">${inr(net)}</div>
         <div class="chips">
           <span class="chip ${cls(Math.round(today))}">Today ${sInr(today)}</span>
           <span class="chip ${cls(pnl)}">All-time ${sInr(pnl)} · ${pct(ppct)}</span>
-          <span class="chip">Live ₹${nf(lm.used_inr || 0)} / ₹${nf(lm.cap_inr || 2000)}</span>
+          <span class="chip gold">Live ₹${nf(lm.used_inr || 0)} / ₹${nf(lm.cap_inr || 2000)}</span>
         </div>
+        <canvas class="spark" id="hspark"></canvas>
       </section>
       ${head('Heat', 'books + top names by P&L')}
       <div class="heat">${cells.join('') || '<div class="sk"></div>'}</div>
@@ -117,10 +128,14 @@
       ${head('Alerts', al.length + ' now')}
       <div class="card alerts"><div class="list">${al.map(a => ext(a.href, `<i class="dot ${a.lvl}"></i><div class="t"><b>${esc(a.t)}</b><span>${esc(a.s || '')}</span></div>`, 'li tap' + (a.jump ? '" data-jump="' + a.jump : ''))).join('') || empty('✓', 'All quiet')}</div></div>
       ${head('Books')}
-      <div class="card"><div class="list">${B.map(b => `<a class="li tap" data-jump="desks:${b.k}"><div class="t"><b>${b.name}</b><span>${b.k === 'meme' ? nf(b.sol, 3) + ' SOL · ' : ''}${b.d.running ? 'running' : 'idle'} · updated ${ago(b.d.last_update)} ago</span></div><div class="v">${inrS(b.eq)}<small class="${cls(b.pct)}">${pct(b.pct)}</small></div></a>`).join('')}</div></div>
+      <div class="booksx">${B.map(b => `<a class="card book tap acc-${b.k}" data-jump="desks:${b.k}"><span class="bt">${b.tag}</span><div><b>${b.name}</b><canvas data-spark="${b.k}"></canvas></div><div class="bv">${inrS(b.eq)}<small class="${cls(b.pct)}">${pct(b.pct)}</small></div></a>`).join('')}</div>
     </div></div>`;
   };
-  V.home.after = (root) => { const el = $('#nw', root); if (el) { const v = books().reduce((a, b) => a + b.eq, 0); el.dataset.v = v * 0.96; countUp(el, v, (x) => inr(x)); } };
+  V.home.after = (root) => { const B = books(); const el = $('#nw', root); if (el) { const v = B.reduce((a, b) => a + b.eq, 0); el.dataset.v = v * 0.96; countUp(el, v, (x) => inr(x)); }
+    $$('canvas[data-spark]', root).forEach(cv => { const b = B.find(x => x.k === cv.dataset.spark); if (b) chart(cv, b.d.curve, { base: b.d.start, spark: 1, c1: ACC[b.k][0], c2: ACC[b.k][1], lw: 2 }); });
+    const days = {}; B.forEach(b => (b.d.daily || []).forEach(x => { days[x.d] = (days[x.d] || 0) + (b.k === 'meme' ? memeInr(x.eq) : x.eq); }));
+    const DK = Object.keys(days).sort(); const hs = $('#hspark', root); if (hs && DK.length > 1) chart(hs, DK.map((k, i) => [i, days[k]]), { spark: 1, c1: '#ff6ad5', c2: '#7cf3ff', lw: 2.6 });
+    const today = B.reduce((a, b) => a + (b.today || 0), 0); if (today >= 1 && !celebrated) { celebrated = true; $('#hero', root).classList.add('celebrate'); setTimeout(confetti, 500); } };
 
   function alerts() {
     const A = [], m = D.markets || {}, f = D.fno || {}, n = D.news || {}, lm = D.live_money || {}, br = D.breakouts || {};
@@ -146,14 +161,14 @@
       return `<div class="agent"><i data-css="${css({ background: c })}"></i><b>${esc(n)}</b><em>${esc(h.status || '')}</em></div>`; }).join('');
     const tr = (t) => `<div class="li"><span class="side ${t.side === 'SHORT' ? 'S' : 'L'}">${t.side === 'SHORT' ? 'S' : 'L'}</span><div class="t"><b>${esc(t.symbol)}</b><span>${ist(t.entry_ts, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}${t.exit_ts ? ' → ' + ist(t.exit_ts) : ''} · ${esc((t.exit_kind || t.status || '').replace(/_/g, ' '))}</span></div><div class="v ${cls(t.pnl)}">${meme ? fS(t.pnl) : sInr(t.pnl)}<small class="${cls(t.pnl_pct)}">${pct(t.pnl_pct, 1)}</small></div></div>`;
     return seg + `<div class="wide"><div>
-      <section class="card glow" id="dcard">
+      <section class="card glow acc-${k}" id="dcard">
         <span class="paper">${esc(d.mode || 'PAPER')}</span>
         <div class="lbl">${k === 'eq' ? 'Equity book · NSE' : k === 'opt' ? 'Options book · NSE F&O' : 'Meme book · Solana'}</div>
-        <div class="big num">${f(d.equity)}</div>
+        <div class="big num grad">${f(d.equity)}</div>
         <div class="row"><span class="chip ${cls(d.pnl)}">${fS(d.pnl)} · ${pct(d.pnl_pct)}</span><span class="chip ${cls(meme ? d.today : Math.round(d.today))}">Today ${fS(d.today)}</span>${meme ? `<span class="chip">${inrS(memeInr(d.equity))}</span>` : ''}</div>
         <div class="chartw"><div class="scrub" id="scrub"></div><canvas class="chart" id="cv"></canvas></div>
       </section>
-      <div class="kv">
+      <div class="kv acc-${k}">
         <div><span class="lbl">Win rate</span><b>${nf(m.win_rate, 1)}%</b></div>
         <div><span class="lbl">Profit f.</span><b class="${(m.profit_factor || 0) >= 1 ? 'up' : 'down'}">${m.profit_factor == null ? '—' : (+m.profit_factor).toFixed(2)}</b></div>
         <div><span class="lbl">Max DD</span><b class="down">${pct(m.max_dd_pct, 1)}</b></div>
@@ -171,7 +186,7 @@
       <div class="card"><div class="list">${(d.trades || []).slice(0, 25).map(tr).join('') || empty('∅', 'No trades yet')}</div></div>
     </div></div>`;
   };
-  V.desks.after = (root) => { const d = desk(sub.desks); if (d) chart($('#cv', root), d.curve, { base: d.start, scrub: $('#scrub', root), fmt: sub.desks === 'meme' ? (v) => nf(v, 3) + ' SOL' : (v) => inr(v) }); };
+  V.desks.after = (root) => { const d = desk(sub.desks); if (d) chart($('#cv', root), d.curve, { base: d.start, c1: ACC[sub.desks][0], c2: ACC[sub.desks][1], lw: 2.6, scrub: $('#scrub', root), fmt: sub.desks === 'meme' ? (v) => nf(v, 3) + ' SOL' : (v) => inr(v) }); };
 
   /* ── pulse ── */
   V.pulse = () => segHtml('pulse', [['markets', 'Markets'], ['fno', 'F&O'], ['breakouts', 'Breakouts'], ['crypto', 'Crypto'], ['news', 'News']]) + (P[sub.pulse] || P.markets)();
@@ -179,8 +194,8 @@
   const P = {};
   P.markets = () => {
     const m = D.markets || {}; const I = m.indices || {}; const s = m.session || {}; const b = m.breadth || {};
-    const idx = ['Nifty', 'BankNifty', 'FinNifty', 'VIX'].filter(k => I[k]).map(k => { const x = I[k]; const p = x.high > x.low ? (x.ltp - x.low) / (x.high - x.low) * 100 : 50;
-      return `<div class="card idx tap"><div class="lbl">${esc(x.name)}</div><div class="mid num">${nf(x.ltp, 2)}</div><div class="row"><span class="chip ${cls(x.change)}">${pct(x.change_pct)}</span><span class="num muted">${x.change > 0 ? '+' : ''}${nf(x.change, 2)}</span></div>
+    const IDXC = { Nifty: 'acc-eq', BankNifty: 'acc-opt', FinNifty: 'sp-cricket', VIX: 'acc-gold' }; const idx = ['Nifty', 'BankNifty', 'FinNifty', 'VIX'].filter(k => I[k]).map(k => { const x = I[k]; const p = x.high > x.low ? (x.ltp - x.low) / (x.high - x.low) * 100 : 50;
+      return `<div class="card idx tap ${IDXC[k]}"><div class="lbl">${esc(x.name)}</div><div class="mid num grad">${nf(x.ltp, 2)}</div><div class="row"><span class="chip ${cls(x.change)}">${pct(x.change_pct)}</span><span class="num muted">${x.change > 0 ? '+' : ''}${nf(x.change, 2)}</span></div>
       <div class="range"><i data-css="${css({ left: p.toFixed(1) + '%' })}"></i></div><div class="range-l"><span>${nf(x.low, 0)}</span><span>day</span><span>${nf(x.high, 0)}</span></div></div>`; }).join('');
     const tot = (b.advances || 0) + (b.declines || 0) + (b.unchanged || 0) || 1;
     const L = ((m.movers || {}).lists || {}); const pick = L.NIFTY || L.allSec || {}; const mv = (arr, up) => (arr || []).slice(0, 6).map(x => `<div class="li"><div class="t"><b>${esc(x.symbol)}</b><span>vol ${esc(x.volume || '')}</span></div><div class="v">${nf(x.ltp, 2)}<small class="${up ? 'up' : 'down'}">${pct(x.change_pct)}</small></div></div>`).join('');
@@ -199,12 +214,12 @@
     const near = rows.filter(r => Math.abs(r.strike - c.atm) <= 1000);
     return `<div class="chips-x">${(f.expiries || []).slice(0, 6).map(e => `<span class="chip ${e === f.preferred_expiry ? 'up' : ''}">${esc(e)}</span>`).join('')}</div>
       <div class="grid g3" data-css="${css({ 'margin-top': '10px' })}">
-        <div class="card"><div class="lbl">Spot</div><div class="mid num">${nf(c.spot, 0)}</div></div>
-        <div class="card"><div class="lbl">Max pain</div><div class="mid num" data-css="color:var(--amber)">${nf(c.max_pain)}</div></div>
-        <div class="card"><div class="lbl">PCR · OI</div><div class="mid num ${(c.pcr_oi || 0) >= 1 ? 'up' : 'down'}">${(c.pcr_oi || 0).toFixed(2)}</div></div>
+        <div class="card acc-eq"><div class="lbl">Spot</div><div class="mid num">${nf(c.spot, 0)}</div></div>
+        <div class="card acc-gold"><div class="lbl">Max pain</div><div class="mid num" data-css="color:var(--amber)">${nf(c.max_pain)}</div></div>
+        <div class="card acc-opt"><div class="lbl">PCR · OI</div><div class="mid num ${(c.pcr_oi || 0) >= 1 ? 'up' : 'down'}">${(c.pcr_oi || 0).toFixed(2)}</div></div>
       </div>
       ${head('Open interest', esc(f.symbol || 'NIFTY') + ' · ' + esc(c.expiry || ''))}
-      <div class="card"><div class="oi-head"><span>CALLS</span><span>STRIKE</span><span>PUTS</span></div>
+      <div class="card acc-aur"><div class="oi-head"><span>CALLS</span><span>STRIKE</span><span>PUTS</span></div>
       <div class="oi">${near.map((r, i) => `<i class="ce" data-css="${css({ width: ((r.ce_oi || 0) / mx * 100).toFixed(1) + '%', 'animation-delay': i * 15 + 'ms' })}"></i><span class="k ${r.strike === c.atm ? 'atm' : r.strike === c.max_pain ? 'mp' : ''}">${nf(r.strike)}</span><i class="pe" data-css="${css({ width: ((r.pe_oi || 0) / mx * 100).toFixed(1) + '%', 'animation-delay': i * 15 + 'ms' })}"></i>`).join('')}</div>
       <p class="note" data-css="margin:12px 0 0">Blue = ATM · amber = max pain. ${esc(f.note || '')}</p></div>
       <div class="grid g2">
@@ -214,15 +229,15 @@
   };
   P.breakouts = () => {
     const b = D.breakouts || {}; const L = b.breakouts || [], N = b.near || []; const mx = Math.max(1, ...L.map(x => x.volume_multiple || 0));
-    return `<div class="card"><div class="lbl">Rule</div><div class="note" data-css="margin-top:4px">${esc(b.rule || '')}</div><div class="row" data-css="margin-top:10px"><span class="chip up">${L.length} breakouts</span><span class="chip">${N.length} near</span><span class="sp"></span><small class="muted num">session ${esc(b.session_date || '')}</small></div></div>
+    return `<div class="card acc-meme"><div class="lbl">Rule</div><div class="note" data-css="margin-top:4px">${esc(b.rule || '')}</div><div class="row" data-css="margin-top:10px"><span class="chip up">${L.length} breakouts</span><span class="chip">${N.length} near</span><span class="sp"></span><small class="muted num">session ${esc(b.session_date || '')}</small></div></div>
       ${head('Breakouts', 'volume × 20-day avg')}
-      <div class="card"><div class="list">${L.map(x => `<div class="lb"><span class="rk">↗</span><div><b>${esc(x.symbol)}</b> <small class="muted num">₹${nf(x.close, 2)} · ${pct(x.pct_from_level, 1)} over ${nf(x.level, 1)}</small><div class="bar"><i data-css="${css({ width: (x.volume_multiple / mx * 100).toFixed(1) + '%' })}"></i></div></div><span class="vol up">${(x.volume_multiple || 0).toFixed(1)}×</span></div>`).join('') || empty('∅', 'No breakouts this session')}</div></div>
+      <div class="card acc-meme"><div class="list">${L.map(x => `<div class="lb"><span class="rk">↗</span><div><b>${esc(x.symbol)}</b> <small class="muted num">₹${nf(x.close, 2)} · ${pct(x.pct_from_level, 1)} over ${nf(x.level, 1)}</small><div class="bar"><i data-css="${css({ width: (x.volume_multiple / mx * 100).toFixed(1) + '%' })}"></i></div></div><span class="vol up">${(x.volume_multiple || 0).toFixed(1)}×</span></div>`).join('') || empty('∅', 'No breakouts this session')}</div></div>
       ${head('Knocking', 'within 1% of the high')}
       <div class="card"><div class="list">${N.slice(0, 15).map(x => `<div class="li"><div class="t"><b>${esc(x.symbol)}</b><span>level ${nf(x.level, 1)} · vol ${(x.volume_multiple || 0).toFixed(2)}×</span></div><div class="v">₹${nf(x.close, 2)}<small class="flat">${pct(x.pct_from_level, 2)}</small></div></div>`).join('') || empty('∅', 'None')}</div></div>`;
   };
   P.crypto = () => {
     const c = D.crypto || {}; const p = c.prices || {};
-    const coins = ['BTC', 'ETH', 'SOL'].map(s => { const x = Live.px[s] || p[s] || {}; return `<div class="card coin" id="coin-${s}"><span class="cs">${s}</span><div class="cm"><div class="mid num" data-f="px">$${nf(x.price, s === 'BTC' ? 0 : 2)}</div><div class="num muted" data-f="inr">${inrS((x.price || 0) * fx())}</div></div><span class="chip num ${cls(x.change_pct)}" data-f="chg">${pct(x.change_pct)}</span></div>`; }).join('');
+    const coins = ['BTC', 'ETH', 'SOL'].map(s => { const x = Live.px[s] || p[s] || {}; return `<div class="card coin ${({ BTC: 'acc-gold', ETH: 'acc-eq', SOL: 'acc-meme' })[s]}" id="coin-${s}"><span class="cs">${s}</span><div class="cm"><div class="mid num grad" data-f="px">$${nf(x.price, s === 'BTC' ? 0 : 2)}</div><div class="num muted" data-f="inr">${inrS((x.price || 0) * fx())}</div></div><span class="chip num ${cls(x.change_pct)}" data-f="chg">${pct(x.change_pct)}</span></div>`; }).join('');
     const prints = (c.large_prints || []).slice(0, 10).map(t => `<div class="li"><span class="side ${t.side === 'sell' ? 'S' : 'L'}">${t.side === 'sell' ? 'SELL' : 'BUY'}</span><div class="t"><b>${nf(t.qty, 2)} ${esc(t.asset)}</b><span>@ $${nf(t.price, 2)} · ${ago(t.ts / (t.ts > 1e12 ? 1000 : 1))} ago</span></div><div class="v">${usd(t.usd)}</div></div>`).join('');
     const tx = (c.transfers || []).slice(0, 10).map(t => `<div class="li"><span class="side">⛓</span><div class="t"><b>${nf(t.qty, 2)} ${esc(t.asset)}</b><span>${esc(t.chain)} · ${esc((t.txid || '').slice(0, 10))}…</span></div><div class="v">${usd(t.usd)}</div></div>`).join('');
     const hl = (c.hl_watch && c.hl_watch.wallets) || [];
@@ -254,21 +269,21 @@
     const h = D.sports_home || {}; const R = (h.sports_rank || []).slice(0, 8); const mx = Math.max(1, ...R.map(r => r.volume24hr || 0));
     const ev = (h.top_events || []).slice(0, 14);
     const evHtml = ev.map((e, i) => { const mk = (e.markets || [])[0] || {}; const outs = (mk.outcomes || []).slice(0, 4); const fav = Math.max(...outs.map(o => o.implied_pct || 0));
-      return ext(e.url, `<div class="row"><span class="rk num muted">#${i + 1}</span><span class="lbl">${esc(Live.LABEL[e.sport] || e.sport || '')}</span><span class="sp"></span>${(e.sources || [e.source || (String(e.id).startsWith('kalshi') ? 'Kalshi' : 'Polymarket')]).map(s => `<span class="src">${esc(String(s).toUpperCase())}</span>`).join(' ')}</div>
+      return ext(e.url, `<div class="row"><span class="rk num" data-css="color:var(--acc)">#${i + 1}</span><span class="lbl">${esc(Live.LABEL[e.sport] || e.sport || '')}</span><span class="sp"></span>${(e.sources || [e.source || (String(e.id).startsWith('kalshi') ? 'Kalshi' : 'Polymarket')]).map(s => `<span class="src">${esc(String(s).toUpperCase())}</span>`).join(' ')}</div>
         <div data-css="font:600 16px/1.3 var(--sans);margin-top:8px">${esc(e.title)}</div>
         <div class="note num">${usd(e.volume24hr)} in 24h · ${usd(e.volume)} total${mk.question ? ' · ' + esc(mk.question) : ''}</div>
-        <div class="odds">${outs.map(o => `<span class="odd ${o.implied_pct === fav ? 'fav' : ''}"><b>${esc(o.name)}</b><span>${nf(o.implied_pct, 0)}%</span></span>`).join('')}</div>`, 'card tap game'); }).join('');
+        <div class="odds">${outs.map(o => `<span class="odd ${o.implied_pct === fav ? 'fav' : ''}"><span class="row"><b>${esc(o.name)}</b><span class="sp"></span><span>${nf(o.implied_pct, 0)}%</span></span>${o.implied_pct === fav ? '' : `<i class="ob" data-css="${css({ width: Math.max(4, o.implied_pct || 0) + '%' })}"></i>`}</span>`).join('')}</div>`, 'card tap game ' + spc(e.sport)); }).join('');
     return `${head('Money flow', '24h · Polymarket + Kalshi')}
-      <div class="card">${R.map((r, i) => `<div class="lb tap" data-sport="${esc(r.sport)}"><span class="rk">${i + 1}</span><div><b>${esc(r.label)}</b> <small class="muted">${r.n_events} events</small><div class="bar"><i data-css="${css({ width: (r.volume24hr / mx * 100).toFixed(1) + '%', 'animation-delay': i * 60 + 'ms' })}"></i></div></div><span class="vol">${usd(r.volume24hr)}</span></div>`).join('') || empty('∅', 'No volume data yet')}</div>
+      <div class="card acc-aur">${R.map((r, i) => `<div class="lb tap ${spc(r.sport)}" data-sport="${esc(r.sport)}"><span class="rk">${i + 1}</span><div><b>${esc(r.label)}</b> <small class="muted">${r.n_events} events</small><div class="bar"><i data-css="${css({ width: (r.volume24hr / mx * 100).toFixed(1) + '%', 'animation-delay': i * 60 + 'ms' })}"></i></div></div><span class="vol">${usd(r.volume24hr)}</span></div>`).join('') || empty('∅', 'No volume data yet')}</div>
       ${head('Most-bet events', '% = implied odds')}${evHtml || `<div class="card">${empty('∅', 'No events')}</div>`}
       <p class="note">${esc(h.disclaimer || '')}</p>`;
   }
   function gameCard(g) {
     const live = g.state === 'in'; const cs = g.competitors || [];
     const teams = cs.slice(0, g.sport === 'golf' || g.sport === 'f1' ? 6 : 2).map((c, i) => { const key = g.id + ':' + i; const bumped = prevScore[key] != null && prevScore[key] !== c.score && c.score !== ''; prevScore[key] = c.score;
-      return `<div class="team ${c.winner ? 'win' : ''} ${String(c.score || '').length > 9 ? 'long' : ''}"><span class="ab">${esc((c.abbr || c.name || '?').slice(0, 4))}</span><span class="nm">${esc(c.name)}</span><span class="sc num ${bumped ? 'bump' : ''}">${esc(c.score || (g.state === 'pre' ? '' : '0'))}</span></div>`; }).join('');
+      const col = c.color ? '#' + String(c.color).replace('#', '') : ''; return `<div class="team ${c.winner ? 'win' : ''} ${String(c.score || '').length > 9 ? 'long' : ''}"><span class="ab ${c.logo ? 'has-img' : ''}" ${col ? `data-css="${css({ '--tc': col })}"` : ''}>${esc((c.abbr || c.name || '?').slice(0, 4))}${c.logo && /^https:\/\/a\.espncdn\.com\//.test(c.logo) ? `<img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(c.logo)}">` : ''}</span><span class="nm">${esc(c.name)}</span><span class="sc num ${bumped ? 'bump' : ''}">${esc(c.score || (g.state === 'pre' ? '' : '0'))}</span></div>`; }).join('');
     const when = g.state === 'pre' && g.start ? ist(g.start, { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) + ' IST' : '';
-    return ext(g.link, `<div class="lg">${live ? '<span class="live-badge">LIVE</span>' : g.state === 'post' ? '<span class="src">FINAL</span>' : '<span class="src">' + esc(when || 'SOON') + '</span>'}<span>${esc(g.league || '')}</span></div>${teams}<div class="det">${esc([g.clock && live && !String(g.detail).includes(g.clock) ? g.clock : '', g.detail].filter(Boolean).join(' · '))}</div>`, 'card tap game' + (live ? ' live' : ''));
+    return ext(g.link, `<div class="lg">${live ? '<span class="live-badge">LIVE</span>' : g.state === 'post' ? '<span class="src">FINAL</span>' : '<span class="src">' + esc(when || 'SOON') + '</span>'}<span>${esc(g.league || '')}</span></div>${teams}<div class="det">${esc([g.clock && live && !String(g.detail).includes(g.clock) ? g.clock : '', g.detail].filter(Boolean).join(' · '))}</div>`, 'card tap game ' + spc(g.sport) + (live ? ' live' : ''));
   }
   function sportBoard(s) {
     const d = sportData(s); if (!d) return `<div class="card"><div class="sk" data-css="height:90px"></div></div><div class="card"><div class="sk" data-css="height:90px"></div></div>`;
@@ -283,23 +298,23 @@
   V.money = () => {
     const L = D.live_money || {}; const cap = L.cap_inr || 2000, used = L.used_inr || 0; const frac = Math.min(1, used / cap);
     const armed = !!L.armed; const arc = 282.7;
-    return `<section class="card glow">
-        <div class="reactor"><div class="gauge"><svg viewBox="0 0 220 124"><path class="trk" d="M20 112a90 90 0 0 1 180 0"/><path class="val" id="gval" d="M20 112a90 90 0 0 1 180 0" data-css="${css({ 'stroke-dasharray': arc, 'stroke-dashoffset': arc, stroke: frac > .8 ? 'var(--down)' : 'var(--up)' })}" data-off="${(arc * (1 - frac)).toFixed(1)}"/></svg>
-          <div class="ctr"><div class="lbl">Capital at risk</div><div class="mid num">${inr(used)} <span class="muted">/ ${inr(cap)}</span></div></div></div>
+    return `<section class="card glow acc-gold">
+        <div class="reactor"><div class="gauge"><svg viewBox="0 0 220 124"><defs><linearGradient id="gg" x1="0" x2="1"><stop offset="0" stop-color="#ffc53d"/><stop offset=".6" stop-color="#ff8a3d"/><stop offset="1" stop-color="#ff3dcb"/></linearGradient></defs><path class="trk" d="M20 112a90 90 0 0 1 180 0"/><path class="val" id="gval" d="M20 112a90 90 0 0 1 180 0" data-css="${css({ 'stroke-dasharray': arc, 'stroke-dashoffset': arc, stroke: 'url(#gg)' })}" data-off="${(arc * (1 - frac)).toFixed(1)}"/></svg>
+          <div class="ctr"><div class="lbl">Capital at risk</div><div class="mid num grad">${inr(used)} <span class="muted">/ ${inr(cap)}</span></div></div></div>
           <div class="state ${armed ? 'armed' : 'off'}">${armed ? 'ARMED' : 'DISARMED'}</div>
           <div class="note">${armed ? 'Real orders can be placed from the box.' : 'No real order can leave the box.'}</div></div>
         <div class="hazard"></div>
         <div class="grid g2" data-css="margin-top:14px">
-          <div><div class="lbl">Hard cap</div><div class="mid num">${inr(cap)}</div></div>
-          <div><div class="lbl">Max loss / trade</div><div class="mid num">${inr(L.per_trade_max_loss_inr)}</div></div>
+          <div><div class="lbl">Hard cap</div><div class="mid num grad">${inr(cap)}</div></div>
+          <div><div class="lbl">Max loss / trade</div><div class="mid num grad">${inr(L.per_trade_max_loss_inr)}</div></div>
         </div>
       </section>
       ${head('Kill switch', L.kill_switch ? 'ON' : 'off')}
-      <div class="card"><div class="row"><div class="sp"><b>${L.kill_switch ? 'Kill switch is ON' : 'Kill switch is off'}</b><div class="note">Flipping it stops all live trading and disarms. It runs on the box, so tell Chief "kill live money".</div></div><span class="switch ${L.kill_switch ? 'on' : ''}"><i></i></span></div></div>
+      <div class="card acc-opt"><div class="row"><div class="sp"><b>${L.kill_switch ? 'Kill switch is ON' : 'Kill switch is off'}</b><div class="note">Flipping it stops all live trading and disarms. It runs on the box, so tell Chief "kill live money".</div></div><span class="switch ${L.kill_switch ? 'on' : ''}"><i></i></span></div></div>
       ${head('Gates', 'all must be green')}
-      <div class="card">${(L.gates || []).map(g => `<div class="gate-li"><span class="ck ${g.ok ? 'y' : 'n'}">${g.ok ? '✓' : '✕'}</span><span>${esc(g.gate)}</span></div>`).join('') || empty('?', 'Status unavailable')}</div>
+      <div class="card acc-gold">${(L.gates || []).map(g => `<div class="gate-li"><span class="ck ${g.ok ? 'y' : 'n'}">${g.ok ? '✓' : '✕'}</span><span>${esc(g.gate)}</span></div>`).join('') || empty('?', 'Status unavailable')}</div>
       ${head('Brokers')}
-      <div class="card"><div class="list">${(L.brokers || []).map(b => `<div class="li broker"><span class="logo">${esc(b.name === 'zerodha' ? 'Z' : b.name === 'groww' ? 'G' : b.name[0].toUpperCase())}</span><div class="t"><b>${esc(b.title)}</b><span>${esc(b.state)}</span></div><span class="ck ${b.connected ? 'y' : 'n'}">${b.connected ? '✓' : '✕'}</span></div>`).join('')}</div>
+      <div class="card"><div class="list">${(L.brokers || []).map(b => `<div class="li broker ${b.name === 'zerodha' ? 'acc-eq' : 'sp-cricket'}"><span class="logo">${esc(b.name === 'zerodha' ? 'Z' : b.name === 'groww' ? 'G' : b.name[0].toUpperCase())}</span><div class="t"><b>${esc(b.title)}</b><span>${esc(b.state)}</span></div><span class="ck ${b.connected ? 'y' : 'n'}">${b.connected ? '✓' : '✕'}</span></div>`).join('')}</div>
         <p class="note">To connect, sign in to the broker through Chief on the box. Keys stay on the box, never here.</p></div>
       ${head('Ledger', (L.ledger || []).length + ' events')}
       <div class="card"><div class="list">${(L.ledger || []).slice().reverse().map(e => `<div class="li"><div class="t"><b>${esc(e.kind)}</b><span>${esc(e.ist || '')} ${esc((e.reasons || []).join('; '))}</span></div></div>`).join('') || empty('∅', 'No live orders. Nothing real has ever left the box.')}</div></div>
@@ -307,8 +322,12 @@
   };
   V.money.after = (root) => { const g = $('#gval', root); if (g) requestAnimationFrame(() => requestAnimationFrame(() => g.style.setProperty('stroke-dashoffset', g.dataset.off))); };
 
+  function imgs(root) { $$('img', root).forEach(i => { const off = () => { const ab = i.parentElement; i.remove(); ab && ab.classList.remove('has-img'); }; if (i.complete && !i.naturalWidth) off(); else i.addEventListener('error', off, { once: true }); }); }
+
   /* ── segmented control ── */
-  function segHtml(key, items) { return `<div class="seg" data-seg="${key}"><i class="seg-pill"></i>${items.map(([k, t, b]) => `<button data-sub="${k}" class="${sub[key] === k ? 'on' : ''}">${esc(t)}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('')}</div><div data-css="height:12px"></div>`; }
+  const SEGC = { eq: ACC.eq, opt: ACC.opt, meme: ACC.meme, markets: ACC.eq, fno: ACC.opt, breakouts: ['#b8ff3c', '#34f5a4'], crypto: ['#9b5cff', '#ffc53d'], news: ['#19e3c4', '#7cf3ff'], home: ['#ff6ad5', '#8b7bff'] };
+  function segHtml(key, items) { const on = sub[key]; const c = SEGC[on] || (SPC[on] ? [SPC[on], SPC[on]] : ['#8b7bff', '#ff6ad5']);
+    return `<div class="seg" data-seg="${key}" data-css="${css({ '--sa': c[0], '--sb': c[1] })}"><i class="seg-pill"></i>${items.map(([k, t, b]) => `<button data-sub="${k}" class="${sub[key] === k ? 'on' : ''} ${key === 'sports' && k !== 'home' ? spc(k) : ''}">${key === 'sports' && k !== 'home' ? '<i class="sd"></i>' : ''}${esc(t)}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('')}</div><div data-css="height:12px"></div>`; }
   function placeSeg(root, animate = true) { $$('.seg', root).forEach(s => { const on = $('button.on', s), pill = $('.seg-pill', s); if (!on || !pill) return; if (!animate) pill.style.setProperty('transition', 'none');
     pill.style.setProperty('width', on.offsetWidth + 'px'); pill.style.setProperty('transform', `translateX(${on.offsetLeft}px)`); if (!animate) requestAnimationFrame(() => pill.style.removeProperty('transition'));
     if (on.offsetLeft + on.offsetWidth > s.scrollLeft + s.clientWidth || on.offsetLeft < s.scrollLeft) s.scrollTo({ left: on.offsetLeft - 20, behavior: animate ? 'smooth' : 'auto' }); }); }
@@ -317,11 +336,11 @@
   function render(opts = {}) {
     if (!D) return; const main = $('#view'); const y = window.scrollY;
     main.innerHTML = `<div class="view${opts.quiet ? '' : ''}">${V[section]()}</div>`; if (opts.quiet) main.firstChild.style.setProperty('animation', 'none');
-    applyCss(main); placeSeg(main, false); V[section].after && V[section].after(main);
+    applyCss(main); imgs(main); placeSeg(main, false); V[section].after && V[section].after(main);
     if (opts.keepScroll) window.scrollTo(0, y); placeDock(); tape();
   }
   function go(s, sb) { if (sb) { if (s === 'desks') sub.desks = sb; if (s === 'pulse') sub.pulse = sb; } if (section !== s || sb) { section = s; H('light'); window.scrollTo({ top: 0 }); render(); } }
-  function placeDock() { const btns = $$('#dock button'); const i = btns.findIndex(b => b.dataset.go === section); btns.forEach((b, j) => b.classList.toggle('on', j === i)); const b = btns[i], pill = $('#pill');
+  function placeDock() { const btns = $$('#dock button'); const i = btns.findIndex(b => b.dataset.go === section); btns.forEach((b, j) => b.classList.toggle('on', j === i)); const b = btns[i], pill = $('#pill'); const DC = { home: ['#7cf3ff', '#ff6ad5'], desks: ['#3d8bff', '#7cc4ff'], pulse: ['#19e3c4', '#8b7bff'], sports: ['#ff8a1f', '#ffc53d'], money: ['#ffc53d', '#ff8a3d'] }[section]; pill.style.setProperty('--pa', DC[0]); pill.style.setProperty('--pb', DC[1]);
     if (!b) return; const vertical = matchMedia('(min-width:900px)').matches;
     if (vertical) { pill.style.setProperty('height', b.offsetHeight + 'px'); pill.style.setProperty('transform', `translateY(${b.offsetTop - 8}px)`); }
     else { pill.style.setProperty('width', b.offsetWidth + 'px'); pill.style.removeProperty('height'); pill.style.setProperty('transform', `translateX(${b.offsetLeft - 7}px)`); } }
@@ -356,7 +375,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Vault.unlocked && Date.now() - lastAct >= IDLE_MS) lock('Locked after 10 minutes idle.'); });
 
   function lock(msg) {
-    Vault.lock(); Live.stop(); unsub && unsub(); clearTimeout(pollT); D = null;
+    Vault.lock(); Live.stop(); unsub && unsub(); celebrated = false; clearTimeout(pollT); D = null;
     $('#view').innerHTML = ''; $('#tape').innerHTML = ''; $('#tape').dataset.h = ''; for (const k in prevScore) delete prevScore[k];
     const app = $('#app'); app.classList.add('hidden'); app.classList.remove('reveal'); app.setAttribute('aria-hidden', 'true');
     const g = $('#gate'); g.classList.remove('hidden', 'leaving', 'working', 'bad'); $('#pass').value = ''; gateMsg(msg || ''); H('medium'); setupBio();
@@ -372,7 +391,7 @@
       const d = await Vault.unlock(pass);
       if (!viaBio && NATIVE && NATIVE.bioAvailable && NATIVE.bioAvailable() && !NATIVE.bioEnrolled() && $('#remember') && $('#remember').checked) { try { NATIVE.bioEnroll(pass); } catch (e) {} }
       pass = null; $('#pass').value = ''; D = d; lastAct = Date.now(); H('success'); gateMsg('');
-      g.classList.add('leaving'); const app = $('#app'); app.classList.remove('hidden'); app.classList.add('reveal'); app.setAttribute('aria-hidden', 'false');
+      g.classList.add('leaving'); const app = $('#app'); app.classList.remove('hidden'); app.classList.add('reveal'); app.addEventListener('animationend', function rv(e) { if (e.target === app) { app.classList.remove('reveal'); app.removeEventListener('animationend', rv); } }); app.setAttribute('aria-hidden', 'false');
       setTimeout(() => g.classList.add('hidden'), 700);
       section = 'home'; render(); Live.start(); unsub = Live.sub(onLive); pollT = setTimeout(poll, POLL_MS);
     } catch (e) {
@@ -384,7 +403,7 @@
   function onLive(type, x) {
     if (!D) return;
     if (type === 'px') { if (section === 'pulse' && sub.pulse === 'crypto') paintCoins(); const tk = $$(`#tape [data-c="${x.sym}"]`); tk.forEach(t => { const n = t.children[1]; n.textContent = '$' + nf(x.d.price, x.sym === 'BTC' ? 0 : 2); if (x.d.dir) { t.classList.remove('flash-up', 'flash-down'); void t.offsetWidth; t.classList.add(x.d.dir > 0 ? 'flash-up' : 'flash-down'); } }); }
-    if (type === 'sport') { if (section === 'sports' && sub.sports === x.sport) { const y = scrollY; const main = $('#view'); main.firstChild.innerHTML = V.sports(); applyCss(main); placeSeg(main, false); scrollTo(0, y); if ($('.bump', main)) H('light'); } else if (section === 'sports') { const s = $(`[data-sub="${x.sport}"]`); } tape(); }
+    if (type === 'sport') { if (section === 'sports' && sub.sports === x.sport) { const y = scrollY; const main = $('#view'); main.firstChild.innerHTML = V.sports(); applyCss(main); imgs(main); placeSeg(main, false); scrollTo(0, y); if ($('.bump', main)) H('light'); } else if (section === 'sports') { const s = $(`[data-sub="${x.sport}"]`); } tape(); }
   }
   function setupBio() {
     const b = $('#bio'); const ok = NATIVE && NATIVE.bioAvailable && NATIVE.bioAvailable();
