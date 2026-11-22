@@ -313,3 +313,6 @@ code{font:400 11px var(--mono);color:var(--gold2)}
 #view{overflow-x:hidden}
 @media (min-width:1000px){.cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.cols.c3{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}}
 .t td.w small{display:block;margin-top:3px;font:400 10px/1.35 var(--mono);color:var(--dim)}.t td.w a{display:block}
+.amb{color:var(--amb)}.kx{font:400 10.5px/1 var(--mono);margin-top:3px}
+.fng{position:relative;height:4px;margin:14px 0 8px;border-radius:2px;background:linear-gradient(90deg,#b8605c,#a88a4f 45%,#8a8a93 50%,#5f9f80 75%,#5fb98e)}
+.fng i{position:absolute;top:-4px;width:2px;height:12px;margin-left:-1px;background:var(--tx);border-radius:1px}

@@ -19,7 +19,7 @@
   const inrS = (n) => { if (!ok(n)) return '—'; const a = Math.abs(n), s = n < 0 ? '−' : ''; return s + '₹' + (a >= 1e7 ? (a / 1e7).toFixed(2) + 'Cr' : a >= 1e5 ? (a / 1e5).toFixed(2) + 'L' : a >= 1e3 ? (a / 1e3).toFixed(1) + 'k' : a.toFixed(0)); };
   const sInr = (n) => !ok(n) ? '—' : Math.abs(n) < 0.5 ? '₹0' : (n > 0 ? '+' : '') + inr(n);
   const sInrS = (n) => !ok(n) ? '—' : Math.abs(n) < 0.5 ? '₹0' : (n > 0 ? '+' : '') + inrS(n);
-  const usd = (n) => { if (!ok(n)) return '—'; const a = Math.abs(n), s = n < 0 ? '−' : ''; return s + '$' + (a >= 1e9 ? (a / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? (a / 1e3).toFixed(1) + 'k' : a.toFixed(0)); };
+  const usd = (n) => { if (!ok(n)) return '—'; const a = Math.abs(n), s = n < 0 ? '−' : ''; return s + '$' + (a >= 1e12 ? (a / 1e12).toFixed(2) + 'T' : a >= 1e9 ? (a / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? (a / 1e3).toFixed(1) + 'k' : a.toFixed(0)); };
   const pct = (n, d = 2) => !ok(n) ? '—' : (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(d) + '%';
   const sg = (n, d = 2) => !ok(n) ? '—' : (n > 0 ? '+' : n < 0 ? '−' : '') + nf(Math.abs(n), d);
   const cls = (n) => !ok(n) ? 'flat' : n > 1e-9 ? 'up' : n < -1e-9 ? 'dn' : 'flat';
@@ -164,6 +164,7 @@
         <div class="last-row"><div class="lbl">Worst DD</div><div class="v dn">${pct(worst, 1)}</div></div>
         <div class="last-row"><div class="lbl">Open</div><div class="v">${pos.length}</div></div>
       </div></div>
+      ${D.insight ? head('Crypto sentiment', '<a data-jump="pulse:insight">more →</a>') + sentiment() : ''}
       ${head('Books', 'paper · INR')}
       ${P(T([['Book', 'l'], 'Equity', 'Today', 'Total', 'Win', 'PF', 'Max DD'], S.map(({ b, s }) => `<tr class="tap" data-jump="desks:${b.k}"><td class="n">${b.name}<small>${(b.d.positions || []).length} open · ${b.d.running ? 'running' : 'idle'}</small></td><td>${inrS(b.eq)}</td><td class="${cls(b.today)}">${sInrS(b.today)}</td><td class="${cls(b.pct)}">${pct(b.pct)}</td><td>${ok(s.wr) ? s.wr.toFixed(0) + '%' : '—'}</td><td>${ok(s.pf) ? s.pf.toFixed(2) : '—'}</td><td class="dn">${pct(s.mdd, 1)}</td></tr>`), 'No books reporting'))}
       ${head('Open positions', pos.length + ' across books')}
@@ -226,7 +227,7 @@
 
   /* ── markets ── */
   const P_ = {};
-  V.pulse = () => segHtml('pulse', [['overview', 'Overview'], ['fno', 'F&O'], ['flows', 'Flows'], ['breakouts', 'Breakouts'], ['crypto', 'Crypto'], ['news', 'News']]) + (P_[sub.pulse] || P_.overview)();
+  V.pulse = () => segHtml('pulse', [['overview', 'Overview'], ['fno', 'F&O'], ['flows', 'Flows'], ['breakouts', 'Breakouts'], ['crypto', 'Crypto'], ['insight', 'Sentiment'], ['news', 'News']]) + (P_[sub.pulse] || P_.overview)();
   P_.overview = () => {
     const M = D.markets || {}, w = W(); const ses = M.session || {}; const rc = M.recap || {};
     const ind = (w && w.quotes.india || []).filter(q => q.p != null);
@@ -314,6 +315,39 @@
       ${P(T([['Wallet', 'l'], 'Account', 'Day', 'Week', 'Win 7d', ['Largest', 'l']], hl.slice(0, 12).map(x => { const p = (x.positions || []).slice().sort((a, b) => b.notional - a.notional)[0]; return `<tr><td class="n">${esc(x.label || (x.address || '').slice(0, 8))}</td><td>${usd(x.account_value)}</td><td class="${cls(x.pnl_day)}">${usd(x.pnl_day)}</td><td class="${cls(x.pnl_week)}">${usd(x.pnl_week)}</td><td class="mu">${ok(x.winrate_7d) ? (x.winrate_7d * 100).toFixed(0) + '%' : '—'}</td><td class="l">${p ? `<span class="${p.side === 'SHORT' ? 'dn' : 'up'}">${esc(p.coin)} ${p.side === 'SHORT' ? 'S' : 'L'}</span> <span class="mu">${usd(p.notional)} · ${p.lev}×</span>` : '—'}</td></tr>`; }), 'No whale snapshot'))}
       ${src((C.notes || []).join(' '))}
     </div></div>`;
+  };
+  const fngCls = (v) => v == null ? '' : v <= 25 ? 'dn' : v < 45 ? 'amb' : v <= 55 ? 'tx2' : v < 75 ? 'up' : 'up';
+  function sentiment() {
+    const I = D.insight || {}; const f = I.fng, g = I.global || {}, cb = I.cb_premium, db = (I.deribit || {}).BTC || {}, r = (I.ratios || {}).BTC || {};
+    if (!f && !g.mcap) return '';
+    const kp = (l, v, c = '', extra = '') => `<div><div class="lbl">${l}</div><div class="v ${c}">${v}</div>${extra}</div>`;
+    return P(`<div class="kpis">${kp('Fear & Greed', f ? `${f.now} <small>${esc(f.label)}</small>` : '—', f ? fngCls(f.now) : '')}${kp('Crypto mcap', usd(g.mcap), '', `<div class="kx ${cls(g.mcap_chg)}">${pct(g.mcap_chg)}</div>`)}${kp('BTC dom', ok(g.btc_dom) ? g.btc_dom.toFixed(1) + '%' : '—')}
+      <div class="last-row">${kp('CB premium', cb ? pct(cb.prem_pct, 3) : '—', cb ? cls(cb.prem_pct) : '')}</div><div class="last-row">${kp('BTC DVOL', ok(db.dvol) ? db.dvol.toFixed(1) : '—')}</div><div class="last-row">${kp('L/S accts', ok(r.ls) ? r.ls.toFixed(2) : '—')}</div></div>`);
+  }
+  P_.insight = () => {
+    const I = D.insight || {}; const f = I.fng; const g = I.global || {}; const R = I.ratios || {}; const L = I.liq || {}; const Db = I.deribit || {}; const cb = I.cb_premium; const bc = I.btc_chain || {}; const ll = I.llama || {};
+    const gauge = f ? `<div class="pp"><div class="row1"><div><div class="lbl">Crypto Fear &amp; Greed</div><div class="rl"><span class="${fngCls(f.now)}">${f.now}</span><span class="mu"> ${esc(f.label)}</span></div></div><div class="rr">${spark(f.hist, 'g')}<div class="note bare">30 days</div></div></div>
+      <div class="fng"><i data-css="${css({ left: f.now + '%' })}"></i></div><div class="legend"><span>Yesterday ${f.yday}</span><span>Week ago ${f.week}</span><span>Month ago ${f.month}</span></div></div>` : empty('Fear & Greed unavailable');
+    return `${head('Sentiment')}${P(gauge)}${sentiment()}
+      ${head('Positioning', 'OKX · 1h')}
+      ${P(T([['Coin', 'l'], 'L/S accts', '24h', 'Top traders', 'Taker B/S', 'Liq 1h L', 'Liq 1h S'], ['BTC', 'ETH', 'SOL'].map(c => { const r = R[c] || {}, l = L[c] || {}; return `<tr><td class="n">${c}</td><td class="${r.ls > 1 ? 'up' : 'dn'}">${ok(r.ls) ? r.ls.toFixed(2) : '—'}</td><td>${spark(r.ls_hist)}</td><td>${ok(r.top_ls) ? r.top_ls.toFixed(2) : '—'}</td><td class="${cls((r.taker || 1) - 1)}">${ok(r.taker) ? r.taker.toFixed(2) : '—'}</td><td class="dn">${usd(l.long)}</td><td class="up">${usd(l.short)}</td></tr>`; }), 'Unavailable'))}
+      ${head('Options & flows')}
+      ${P(T([['Metric', 'l'], 'BTC', 'ETH'], [
+        `<tr><td class="n">DVOL (implied vol)</td><td>${ok((Db.BTC || {}).dvol) ? Db.BTC.dvol.toFixed(1) : '—'} ${spark((Db.BTC || {}).dvol_hist, 'g')}</td><td>${ok((Db.ETH || {}).dvol) ? Db.ETH.dvol.toFixed(1) : '—'} ${spark((Db.ETH || {}).dvol_hist, 'g')}</td></tr>`,
+        `<tr><td class="n">Put/call OI</td><td>${ok((Db.BTC || {}).pc_oi) ? Db.BTC.pc_oi.toFixed(2) : '—'}</td><td>${ok((Db.ETH || {}).pc_oi) ? Db.ETH.pc_oi.toFixed(2) : '—'}</td></tr>`,
+        `<tr><td class="n">Put/call volume</td><td>${ok((Db.BTC || {}).pc_vol) ? Db.BTC.pc_vol.toFixed(2) : '—'}</td><td>${ok((Db.ETH || {}).pc_vol) ? Db.ETH.pc_vol.toFixed(2) : '—'}</td></tr>`]))}
+      ${P(T([['Market', 'l'], 'Value', 'Change'], [
+        cb ? `<tr><td class="n">Coinbase premium<small>BTC-USD vs Binance USDT</small></td><td class="${cls(cb.prem_usd)}">${cb.prem_usd >= 0 ? '+' : '−'}$${nu(Math.abs(cb.prem_usd))}</td><td class="${cls(cb.prem_pct)}">${pct(cb.prem_pct, 3)}</td></tr>` : '',
+        `<tr><td class="n">Total crypto mcap</td><td>${usd(g.mcap)}</td><td class="${cls(g.mcap_chg)}">${pct(g.mcap_chg)}</td></tr>`,
+        `<tr><td class="n">24h volume</td><td>${usd(g.vol)}</td><td class="mu">—</td></tr>`,
+        `<tr><td class="n">BTC / ETH dominance</td><td>${ok(g.btc_dom) ? g.btc_dom.toFixed(1) : '—'}% / ${ok(g.eth_dom) ? g.eth_dom.toFixed(1) : '—'}%</td><td class="mu">—</td></tr>`,
+        `<tr><td class="n">Stablecoin supply</td><td>${usd(ll.stables)} ${spark(ll.stables_hist)}</td><td class="${cls(ll.stables_7d)}">${pct(ll.stables_7d)} 7d</td></tr>`,
+        `<tr><td class="n">DeFi TVL</td><td>${usd(ll.tvl)} ${spark(ll.tvl_hist)}</td><td class="${cls(ll.tvl_7d)}">${pct(ll.tvl_7d)} 7d</td></tr>`,
+        `<tr><td class="n">BTC fees (sat/vB)</td><td>${bc.fast ?? '—'} / ${bc.hour ?? '—'} / ${bc.eco ?? '—'}</td><td class="mu">fast/hour/eco</td></tr>`,
+        `<tr><td class="n">BTC hashrate</td><td>${ok(bc.hashrate_eh) ? nf(bc.hashrate_eh, 0) + ' EH/s' : '—'}</td><td class="mu">—</td></tr>`].filter(Boolean)))}
+      ${head('Trending', 'CoinGecko searches')}
+      ${P(T([['Coin', 'l'], 'Rank', '24h'], (I.trending || []).map(t => `<tr><td class="n">${esc(t.s)}<small>${esc(t.n)}</small></td><td class="mu">${t.rank || '—'}</td><td class="${cls(t.chg)}">${pct(t.chg, 1)}</td></tr>`), 'Unavailable'))}
+      ${src('alternative.me · CoinGecko · OKX · Deribit · Coinbase · mempool.space · DefiLlama. Liquidations are an OKX sample, not market-wide.' + ((I.failed || []).length ? ' Unavailable: ' + I.failed.join(', ') : ''))}`;
   };
   const newsList = (items, n = 50) => items.slice(0, n).map(i => ext(i.link, `<i class="sev s${i.sev || (i.flags && i.flags.length ? 2 : 1)}"></i><div class="t"><b>${esc(i.title)}</b><span>${esc(i.source || '')} · ${ago(i.ts)}${i.place ? ' · ' + esc(i.place) : ''}</span></div>`, 'li')).join('') || empty('No headlines');
   P_.news = () => {
