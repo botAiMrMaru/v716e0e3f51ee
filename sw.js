@@ -1,5 +1,5 @@
 /* App-shell cache only. The sealed vault and live feeds are never cached. */
-const V = 'vanta-v1';
+const V = 'vanta-v2';
 const SHELL = ['./', 'index.html', 'vanta.css', 'config.js', 'vault.js', 'live.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'fonts/unbounded.woff2', 'fonts/geist.woff2', 'fonts/geistmono.woff2'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

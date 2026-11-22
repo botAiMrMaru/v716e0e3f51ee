@@ -175,7 +175,8 @@ canvas.chart{display:block;width:100%;height:190px;touch-action:pan-y}
 .oi-head{display:grid;grid-template-columns:1fr 64px 1fr;font:600 10px var(--sans);letter-spacing:.14em;color:var(--mute);margin-bottom:8px;text-align:center}
 .coin{position:relative}
 .coin .mid{transition:color .5s}
-.coin.tick-up .mid{color:var(--up)}.coin.tick-down .mid{color:var(--down)}
+.coin.tick-up .mid{animation:cup 1.1s var(--ease)}.coin.tick-down .mid{animation:cdn 1.1s var(--ease)}
+@keyframes cup{0%{color:var(--up);text-shadow:0 0 16px rgba(184,255,60,.5)}}@keyframes cdn{0%{color:var(--down);text-shadow:0 0 16px rgba(255,77,109,.5)}}
 .news-flag{border-left:2px solid var(--amber);padding-left:10px!important}
 .chips-x{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
 .chips-x::-webkit-scrollbar{display:none}
