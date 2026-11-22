@@ -7,7 +7,7 @@
       commodities: 'Commodities', tv: 'Live TV', weather: 'Weather', keys: 'Keys', play: 'Play',
       brief: 'Morning brief', alerts: 'Price alerts on', alertsOff: 'Enable price alerts',
       lang: 'हिन्दी', fun: 'For fun only', notTips: 'Data and news only — not SEBI-regulated tips.',
-      tvHint: 'Tap a tile to play. Streams are public YouTube live broadcasts.',
+      tvHint: 'Muted autoplay · tap a stream for sound. Official YouTube live only.',
       weatherHint: '7-day rain for major Indian crop regions. Free Open-Meteo data, not a farm advisory.',
       wait: 'Waiting for the next sealed feed.',
     },
@@ -16,7 +16,7 @@
       commodities: 'कमोडिटी', tv: 'लाइव टीवी', weather: 'मौसम', keys: 'कुंजी', play: 'खेल',
       brief: 'सुबह की ब्रीफ', alerts: 'मूल्य अलर्ट चालू', alertsOff: 'मूल्य अलर्ट चालू करें',
       lang: 'English', fun: 'केवल मनोरंजन', notTips: 'केवल डेटा और समाचार — SEBI-नियंत्रित सलाह नहीं।',
-      tvHint: 'चलाने के लिए टाइल दबाएँ। ये सार्वजनिक YouTube लाइव प्रसारण हैं।',
+      tvHint: 'म्यूट ऑटोप्ले · आवाज़ के लिए एक स्ट्रीम दबाएँ। केवल आधिकारिक YouTube लाइव।',
       weatherHint: 'मुख्य फसल क्षेत्रों का 7-दिन का बारिश विवरण। Open-Meteo, कृषि सलाह नहीं।',
       wait: 'अगले सील फीड की प्रतीक्षा।',
     }
@@ -24,34 +24,81 @@
   let lang = 'en', alertOn = false, lastPx = {}, subFun = null;
 
   const t = (k) => (I18N[lang] && I18N[lang][k]) || (I18N.en[k] || k);
-  const yt = (id, ch) => id
-    ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=0&mute=1&playsinline=1&rel=0`
-    : (ch ? `https://www.youtube-nocookie.com/embed/live_stream?channel=${encodeURIComponent(ch)}&autoplay=0&mute=1&playsinline=1&rel=0` : '');
+
+  const yt = (id, mute, play) => id
+    ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=${play ? 1 : 0}&mute=${mute ? 1 : 0}&playsinline=1&rel=0&modestbranding=1`
+    : '';
+
+  function liveList(D, group) {
+    const C = (D && D.chi && D.chi.tv) || {};
+    return (C[group] || []).filter(v => v && v.v && v.live !== false);
+  }
+
+  function liveGrid(D, u, group, opts) {
+    const list = liveList(D, group);
+    if (!list.length) return '';
+    const asof = ((D && D.chi && D.chi.tv) || {}).ist || '';
+    const tiles = list.map((v, i) => {
+      const eager = i < 6;
+      const src = yt(v.v, true, eager);
+      return `<div class="live-tile" data-live-id="${u.esc(v.v)}">
+        <div class="live-frame">${eager ? `<iframe src="${src}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="${u.esc(v.name || 'Live')}"></iframe>` : `<button type="button" class="live-ph" data-live-load="${u.esc(v.v)}" aria-label="Load ${u.esc(v.name || 'live stream')}"></button>`}</div>
+        <div class="live-bar"><span class="live-pip" aria-hidden="true"></span><span class="nm">${u.esc(v.name || '')}</span>
+          <button type="button" class="live-mute on" data-live-toggle="${u.esc(v.v)}" aria-label="Sound for ${u.esc(v.name || '')}">Tap for sound</button></div>
+      </div>`;
+    }).join('');
+    const title = (opts && opts.title) || 'Live now';
+    return `${u.head(title, asof ? ('verified ' + asof) : 'muted autoplay')}
+      ${u.P(`<p class="lead">${t('tvHint')}</p><div class="live-grid" data-live-group="${u.esc(group)}">${tiles}</div>`)}
+      ${u.src('Official YouTube live broadcasts, checked every few minutes. Streams that are not live are dropped. Autoplay is muted; tap one tile for sound.')}`;
+  }
+
+  function afterLive(root) {
+    if (!root) return;
+    const load = (tile, id, mute) => {
+      if (!tile || !id) return;
+      const frame = tile.querySelector('.live-frame');
+      if (!frame) return;
+      frame.innerHTML = `<iframe src="${yt(id, mute, true)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="Live"></iframe>`;
+      const btn = tile.querySelector('[data-live-toggle]');
+      if (btn) { btn.classList.toggle('on', !!mute); btn.textContent = mute ? 'Tap for sound' : 'Sound on'; }
+    };
+    root.querySelectorAll('[data-live-load]').forEach(ph => {
+      const tile = ph.closest('.live-tile');
+      if (!tile) return;
+      const io = new IntersectionObserver((ents) => {
+        ents.forEach(en => { if (en.isIntersecting) { load(tile, ph.dataset.liveLoad, true); io.disconnect(); } });
+      }, { rootMargin: '120px' });
+      io.observe(ph);
+    });
+    if (root.dataset.liveBound) return;
+    root.dataset.liveBound = '1';
+    root.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-live-toggle], [data-live-load]');
+      if (!btn) return;
+      e.preventDefault();
+      const tile = btn.closest('.live-tile');
+      const id = btn.dataset.liveToggle || btn.dataset.liveLoad;
+      if (btn.dataset.liveLoad) { load(tile, id, true); return; }
+      const turnOn = btn.classList.contains('on');
+      root.querySelectorAll('.live-tile').forEach(t => {
+        const tid = t.dataset.liveId;
+        if (!tid || !t.querySelector('iframe')) return;
+        load(t, tid, !(turnOn && tid === id));
+      });
+    });
+  }
 
   function tv(D, u) {
     const C = (D && D.chi && D.chi.tv) || {};
-    const W = (D && D.world && D.world.videos) || {};
-    const merge = (a, b) => {
-      const out = [], seen = new Set();
-      for (const x of [].concat(a || [], b || [])) {
-        const k = x.name || x.v; if (!k || seen.has(k)) continue; seen.add(k); out.push(x);
-      }
-      return out;
-    };
-    const news = merge(C.news, W.news), war = merge(C.war, W.war), cams = W.cams || [];
-    const grid = (list) => !list.length ? u.empty(t('wait')) : `<div class="tv-grid">${list.map(v => {
-      const src = yt(v.v, v.channel); if (!src) return '';
-      return `<button type="button" class="tv-tile" data-tv="${u.esc(src)}" data-title="${u.esc(v.name || '')}"><span class="nm">${u.esc(v.name)}</span><span class="meta">${u.esc((v.title || '').slice(0, 80))}</span></button>`;
-    }).join('')}</div>`;
-    return `${u.P(`<p class="lead">${t('tvHint')}</p>`)}
-      <div id="tv-stage" class="tv-stage hidden"></div>
-      ${u.head('Business', '')}${u.P(grid(news))}
-      ${u.head('World', '')}${u.P(grid(war))}
-      ${cams.length ? u.head('Live cams', '') + u.P(grid(cams)) : ''}
-      ${u.src('Public YouTube live channels. CNBC-TV18, ET Now, Zee Business, NDTV Profit, Bloomberg, Al Jazeera, DW.')}`;
+    const news = liveGrid(D, u, 'news', { title: 'News' });
+    const war = liveGrid(D, u, 'war', { title: 'World & war' });
+    const sports = liveGrid(D, u, 'sports', { title: 'Sports' });
+    if (!news && !war && !sports) return u.P(`<p class="lead">${t('wait')}</p>`);
+    return news + war + sports + u.src('Public official YouTube live channels only.');
   }
 
-  function weather(D, u) {
+    function weather(D, u) {
     const rows = (D && D.chi && D.chi.weather) || [];
     if (!rows.length) return u.P(`<p class="lead">${t('wait')}</p>`);
     const card = rows.map(r => {
@@ -122,5 +169,5 @@
 
   function toggleLang() { lang = lang === 'en' ? 'hi' : 'en'; applyLang(document); const m=document.querySelector('.lang-mark'); if(m) m.textContent = lang==='en' ? 'अ' : 'A'; return lang; }
 
-  window.Chi = Object.freeze({ tv, weather, brief, meter, t, applyLang, watchPrices, enableAlerts, toggleLang, get lang() { return lang; }, get alerts() { return alertOn; } });
+  window.Chi = Object.freeze({ tv, liveGrid, afterLive, weather, brief, meter, t, applyLang, watchPrices, enableAlerts, toggleLang, get lang() { return lang; }, get alerts() { return alertOn; } });
 })();
