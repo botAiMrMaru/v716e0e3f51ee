@@ -73,7 +73,7 @@
   let ws = null, wsTry = 0; const px = {};
   function wsOpen() {
     if (ws || document.hidden) return;
-    try { ws = new WebSocket('wss://data-stream.binance.vision/stream?streams=btcusdt@miniTicker/ethusdt@miniTicker/solusdt@miniTicker'); } catch (e) { return; }
+    try { ws = new WebSocket('wss://data-stream.binance.vision/stream?streams=btcusdt@miniTicker/ethusdt@miniTicker/solusdt@miniTicker/xrpusdt@miniTicker/dogeusdt@miniTicker'); } catch (e) { return; }
     ws.onmessage = (m) => { try { const d = JSON.parse(m.data).data; const sym = d.s.replace('USDT', ''); const c = +d.c, o = +d.o;
       const prev = px[sym] && px[sym].price; px[sym] = { price: c, change_pct: (c - o) / o * 100, high: +d.h, low: +d.l, dir: prev == null ? 0 : Math.sign(c - prev), ts: Date.now() };
       emit('px', { sym, d: px[sym] }); } catch (e) {} };
@@ -83,12 +83,28 @@
   }
   function wsClose() { if (ws) { ws.onclose = null; ws.close(); ws = null; } }
 
+  // Binance USD-M futures public endpoints (funding + open interest). Geo-restricted in some regions; vault (OKX) is the fallback.
+  const fut = {}; let futAt = 0;
+  async function pullFutures() {
+    if (Date.now() - futAt < 50000) return fut; futAt = Date.now();
+    const F = 'https://fapi.binance.com/fapi/v1/';
+    await Promise.allSettled(['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'].map(async (c) => {
+      const o = { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' };
+      const [a, b] = await Promise.all([fetch(F + 'premiumIndex?symbol=' + c + 'USDT', o), fetch(F + 'openInterest?symbol=' + c + 'USDT', o)]);
+      if (!a.ok || !b.ok) throw 0;
+      const p = await a.json(), q = await b.json(); const mark = +p.markPrice;
+      fut[c] = { c, funding: +p.lastFundingRate, funding_ann: +p.lastFundingRate * 3 * 365 * 100, next: +p.nextFundingTime, mark, basis: (mark - +p.indexPrice) / +p.indexPrice * 100, oi_ccy: +q.openInterest, oi_usd: +q.openInterest * mark, ts: Date.now() };
+    }));
+    if (Object.keys(fut).length) emit('fut', fut);
+    return fut;
+  }
+
   document.addEventListener('visibilitychange', () => { if (!Live.on) return; if (document.hidden) { wsClose(); clearTimeout(timer); clearTimeout(tickerTimer); } else { wsOpen(); loop(); tickerLoop(); } });
 
   const Live = {
-    on: false, sports, px, LABEL, SPORTS: Object.keys(BOARDS),
+    on: false, sports, px, fut, LABEL, SPORTS: Object.keys(BOARDS), pullFutures,
     start() { this.on = true; wsOpen(); tickerLoop(); },
-    stop() { this.on = false; wsClose(); clearTimeout(timer); clearTimeout(tickerTimer); active = null; for (const k in sports) delete sports[k]; for (const k in px) delete px[k]; },
+    stop() { this.on = false; wsClose(); clearTimeout(timer); clearTimeout(tickerTimer); active = null; for (const k in sports) delete sports[k]; for (const k in px) delete px[k]; for (const k in fut) delete fut[k]; futAt = 0; },
     watch(sport) { active = sport; loop(); },
     unwatch() { active = null; clearTimeout(timer); },
     sub(f) { subs.add(f); return () => subs.delete(f); },

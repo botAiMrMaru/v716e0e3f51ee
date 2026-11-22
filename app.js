@@ -1,381 +1,515 @@
-/* VANTA — a private command bridge. All data arrives sealed; this file renders it in memory only. */
+/* VANTA · private terminal. Renders the decrypted vault (memory only) plus public live feeds. No storage, no third parties. */
 (() => {
   'use strict';
   const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const TCFG = window.VANTA_CFG || {}; const IDLE_MS = TCFG.idleMsTest || 10 * 60 * 1000, POLL_MS = TCFG.pollMsTest || 75 * 1000;
-  let D = null, section = 'home', sub = { desks: 'eq', pulse: 'markets', sports: 'home', news: 'all' }, lastAct = Date.now(), pollT = null, unsub = null;
+  let D = null, section = 'home', pollT = null, lastAct = Date.now(), unsub = null;
+  const sub = { desks: 'eq', pulse: 'overview', world: 'intel', sports: 'home', fno: 'NIFTY', mov: 'NIFTY', std: 'nba', curve: 'intraday', feed: 'all', news: 'all', wnews: 'all' };
   const prevScore = {};
-
-  /* ── haptics ── */
   const NATIVE = window.VantaNative || null;
-  const H = (k = 'light') => { try { if (NATIVE && NATIVE.haptic) return NATIVE.haptic(k); if (navigator.vibrate) navigator.vibrate({ light: 8, medium: 16, heavy: 28, success: [10, 40, 14], error: [30, 50, 30, 50, 30] }[k] || 8); } catch (e) {} };
+  const H = (k = 'light') => { try { if (NATIVE && NATIVE.haptic) return NATIVE.haptic(k); if (navigator.vibrate) navigator.vibrate({ light: 6, medium: 12, heavy: 22, success: [8, 30, 10], error: [24, 40, 24] }[k] || 6); } catch (e) {} };
+  const UP = '#5fb98e', DN = '#d9706b', GOLD = '#cdb27c', MU = '#7d7d87';
 
   /* ── format ── */
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const nf = (n, d = 0) => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
-  const inr = (n, d = 0) => (n == null || isNaN(n)) ? '—' : (n < 0 ? '−' : '') + '₹' + nf(Math.abs(n), d);
-  const inrS = (n) => { if (n == null || isNaN(n)) return '—'; const a = Math.abs(n), s = n < 0 ? '−' : '';
-    return a >= 1e7 ? s + '₹' + (a / 1e7).toFixed(2) + 'Cr' : a >= 1e5 ? s + '₹' + (a / 1e5).toFixed(2) + 'L' : a >= 1e3 ? s + '₹' + (a / 1e3).toFixed(1) + 'k' : s + '₹' + a.toFixed(0); };
-  const sInr = (n) => (n == null || isNaN(n)) ? '—' : Math.abs(n) < 0.5 ? '₹0' : (n > 0 ? '+' : '') + inr(n);
-  const usd = (n) => { if (n == null || isNaN(n)) return '—'; const a = Math.abs(n); return a >= 1e9 ? '$' + (a / 1e9).toFixed(2) + 'B' : a >= 1e6 ? '$' + (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? '$' + (a / 1e3).toFixed(0) + 'k' : '$' + a.toFixed(0); };
-  const pct = (n, d = 2) => (n == null || isNaN(n)) ? '—' : (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(d) + '%';
-  const cls = (n) => n > 1e-9 ? 'up' : n < -1e-9 ? 'down' : 'flat';
-  const px = (n) => n >= 1000 ? nf(n, 2) : n >= 1 ? Number(n).toFixed(2) : Number(n).toPrecision(4);
-  const ago = (ts) => { if (!ts) return '—'; const s = Math.max(0, Date.now() / 1000 - ts); return s < 60 ? Math.floor(s) + 's' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd'; };
-  const ist = (ts, o = { hour: '2-digit', minute: '2-digit', hour12: false }) => ts ? new Date(ts * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', ...o }) : '—';
+  const ok = (n) => n != null && n !== '' && !isNaN(n) && isFinite(n);
+  const nf = (n, d = 0) => !ok(n) ? '—' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const nu = (n, d = 2) => !ok(n) ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const inr = (n, d = 0) => !ok(n) ? '—' : (n < 0 ? '−' : '') + '₹' + nf(Math.abs(n), d);
+  const inrS = (n) => { if (!ok(n)) return '—'; const a = Math.abs(n), s = n < 0 ? '−' : ''; return s + '₹' + (a >= 1e7 ? (a / 1e7).toFixed(2) + 'Cr' : a >= 1e5 ? (a / 1e5).toFixed(2) + 'L' : a >= 1e3 ? (a / 1e3).toFixed(1) + 'k' : a.toFixed(0)); };
+  const sInr = (n) => !ok(n) ? '—' : Math.abs(n) < 0.5 ? '₹0' : (n > 0 ? '+' : '') + inr(n);
+  const sInrS = (n) => !ok(n) ? '—' : Math.abs(n) < 0.5 ? '₹0' : (n > 0 ? '+' : '') + inrS(n);
+  const usd = (n) => { if (!ok(n)) return '—'; const a = Math.abs(n), s = n < 0 ? '−' : ''; return s + '$' + (a >= 1e9 ? (a / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? (a / 1e3).toFixed(1) + 'k' : a.toFixed(0)); };
+  const pct = (n, d = 2) => !ok(n) ? '—' : (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(d) + '%';
+  const sg = (n, d = 2) => !ok(n) ? '—' : (n > 0 ? '+' : n < 0 ? '−' : '') + nf(Math.abs(n), d);
+  const cls = (n) => !ok(n) ? 'flat' : n > 1e-9 ? 'up' : n < -1e-9 ? 'dn' : 'flat';
+  const px = (n) => !ok(n) ? '—' : n >= 1000 ? nu(n, 2) : n >= 1 ? Number(n).toFixed(2) : Number(n).toPrecision(4);
+  const sec = (ts) => ts > 1e11 ? ts / 1000 : ts;
+  const ago = (ts) => { if (!ts) return '—'; const s = Math.max(0, Date.now() / 1000 - sec(ts)); return s < 60 ? Math.floor(s) + 's' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd'; };
+  const ist = (ts, o = { hour: '2-digit', minute: '2-digit', hour12: false }) => ts ? new Date(sec(ts) * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', ...o }) : '—';
   const css = (o) => esc(Object.entries(o).map(([k, v]) => k + ':' + v).join('|'));
   const applyCss = (root) => $$('[data-css]', root).forEach(el => { el.dataset.css.split('|').forEach(p => { const i = p.indexOf(':'); if (i > 0) el.style.setProperty(p.slice(0, i), p.slice(i + 1)); }); el.removeAttribute('data-css'); });
-  const tint = (v, max) => { const t = Math.min(1, Math.abs(v) / (max || 1)); const a = (0.08 + 0.4 * t).toFixed(3); return v >= 0 ? `rgba(184,255,60,${a})` : `rgba(255,77,109,${a})`; };
   const ext = (href, inner, c = '') => href ? `<a class="${c}" href="${esc(href)}" target="_blank" rel="noopener noreferrer nofollow">${inner}</a>` : `<div class="${c}">${inner}</div>`;
-  const empty = (g, t) => `<div class="empty"><span class="glyph">${g}</span>${esc(t)}</div>`;
+  const empty = (t) => `<div class="empty">${esc(t)}</div>`;
   const head = (t, s = '') => `<div class="h"><h2>${esc(t)}</h2><small>${s}</small></div>`;
-  const toast = (t) => { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 2400); };
+  const P = (inner, c = '') => `<div class="p ${c}">${inner}</div>`;
+  const src = (t) => `<span class="src">${esc(t)}</span>`;
+  const toast = (t) => { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 2200); };
+  const T = (cols, rows, emptyMsg = 'Nothing here yet') => `<div class="tw"><table class="t"><thead><tr>${cols.map(c => Array.isArray(c) ? `<th class="${c[1]}">${c[0]}</th>` : `<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.join('') : `<tr><td colspan="${cols.length}" class="l mu">${esc(emptyMsg)}</td></tr>`}</tbody></table></div>`;
+  const tag = (t, c = '') => `<span class="tag ${c}">${esc(t)}</span>`;
+  const bar = (frac, c = '') => `<span class="bar ${c}"><i data-css="${css({ width: Math.max(2, Math.min(100, frac * 100)).toFixed(1) + '%' })}"></i></span>`;
+  const rng = (lo, hi, v) => (!ok(lo) || !ok(hi) || !ok(v) || hi <= lo) ? '<span class="dim">—</span>' : `<span class="rng"><i data-css="${css({ left: Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100)).toFixed(1) + '%' })}"></i></span>`;
+  function spark(arr, c) { const a = (arr || []).filter(ok); if (a.length < 2) return '<span class="dim">—</span>'; const lo = Math.min(...a), hi = Math.max(...a), n = a.length - 1;
+    const d = a.map((v, i) => (i ? 'L' : 'M') + (i / n * 64).toFixed(1) + ' ' + (16.5 - (v - lo) / ((hi - lo) || 1) * 15).toFixed(1)).join('');
+    return `<svg class="spk ${c || (a[n] > a[0] ? 'u' : a[n] < a[0] ? 'd' : 'f')}" viewBox="0 0 64 18" preserveAspectRatio="none"><path vector-effect="non-scaling-stroke" d="${d}"/></svg>`; }
+  const segHtml = (key, items, small) => `<div class="seg ${small ? 's2' : ''}" data-seg="${key}"><i class="seg-pill"></i>${items.map(([k, t, b]) => `<button data-sub="${k}" class="${sub[key] === k ? 'on' : ''}">${esc(t)}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('')}</div>`;
 
   /* ── derived ── */
   const fx = () => (D && D.fx && D.fx.usdinr) || 84.5;
+  const W = () => (D && D.world && !D.world.error) ? D.world : null;
   const desk = (k) => (D && D.desks && D.desks[k] && D.desks[k].state === 'ok') ? D.desks[k] : null;
-  const memeInr = (v) => v * ((desk('meme') || {}).sol_usd || 0) * fx();
+  const memeInr = (v) => ok(v) ? v * ((desk('meme') || {}).sol_usd || 0) * fx() : null;
+  const BOOKS = { eq: 'Equity', opt: 'Options', meme: 'Meme · SOL' };
   function books() {
     const out = []; const e = desk('eq'), o = desk('opt'), m = desk('meme');
-    if (e) out.push({ k: 'eq', name: 'Equity', tag: 'EQ', eq: e.equity, start: e.start, pnl: e.pnl, pct: e.pnl_pct, today: e.today, d: e });
-    if (o) out.push({ k: 'opt', name: 'Options', tag: 'OPT', eq: o.equity, start: o.start, pnl: o.pnl, pct: o.pnl_pct, today: o.today, d: o });
-    if (m) out.push({ k: 'meme', name: 'Meme · SOL', tag: 'MEME', eq: memeInr(m.equity), start: memeInr(m.start), pnl: memeInr(m.pnl), pct: m.pnl_pct, today: memeInr(m.today), d: m, sol: m.equity });
+    if (e) out.push({ k: 'eq', name: 'Equity', tag: 'EQ', eq: e.equity, start: e.start, pnl: e.pnl, pct: e.pnl_pct, today: e.today, d: e, conv: (v) => v });
+    if (o) out.push({ k: 'opt', name: 'Options', tag: 'OPT', eq: o.equity, start: o.start, pnl: o.pnl, pct: o.pnl_pct, today: o.today, d: o, conv: (v) => v });
+    if (m) out.push({ k: 'meme', name: 'Meme · SOL', tag: 'MEME', eq: memeInr(m.equity), start: memeInr(m.start), pnl: memeInr(m.pnl), pct: m.pnl_pct, today: memeInr(m.today), d: m, conv: memeInr });
     return out;
   }
-
-  /* ── chart ── */
-  function chart(cv, pts, opts = {}) {
-    if (!cv || !pts || pts.length < 2) return;
-    const dpr = Math.min(3, window.devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
-    cv.width = w * dpr; cv.height = h * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
-    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-    const base = opts.base; let lo = Math.min(...ys, base ?? Infinity), hi = Math.max(...ys, base ?? -Infinity); if (hi === lo) { hi += 1; lo -= 1; }
-    const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
-    const N = pts.length - 1; const X = (x, i) => i / (N || 1) * (w - 12) + 4, Y = (y) => h - 10 - (y - lo) / (hi - lo) * (h - 24);
-    const up = ys[ys.length - 1] >= (base ?? ys[0]); const c1 = opts.c1 || (up ? '#34f5a4' : '#ff4d7a'), c2 = opts.c2 || (up ? '#7cf3ff' : '#ff3dcb'); const col = hexRgb(c1);
-    if (base != null) { g.setLineDash([3, 5]); g.strokeStyle = 'rgba(255,255,255,.18)'; g.lineWidth = 1; g.beginPath(); g.moveTo(0, Y(base)); g.lineTo(w, Y(base)); g.stroke(); g.setLineDash([]); }
-    const path = () => { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(p[0], i), Y(p[1])) : g.moveTo(X(p[0], i), Y(p[1]))); };
-    const grd = g.createLinearGradient(0, 0, 0, h); grd.addColorStop(0, `rgba(${col},.42)`); grd.addColorStop(.6, `rgba(${hexRgb(c2)},.10)`); grd.addColorStop(1, `rgba(${col},0)`);
-    path(); g.lineTo(X(0, N), h); g.lineTo(X(0, 0), h); g.closePath(); g.fillStyle = grd; g.fill();
-    const lg = g.createLinearGradient(0, 0, w, 0); lg.addColorStop(0, c2); lg.addColorStop(1, c1); path(); g.strokeStyle = lg; g.lineWidth = opts.lw || 2.4; g.lineJoin = 'round'; g.lineCap = 'round'; g.shadowColor = `rgba(${col},.7)`; g.shadowBlur = 14; g.stroke(); g.shadowBlur = 0;
-    const lx = X(0, N), ly = Y(ys[ys.length - 1]); g.fillStyle = `rgb(${col})`; g.beginPath(); g.arc(lx, ly, 3.5, 0, 7); g.fill();
-    g.strokeStyle = `rgba(${col},.35)`; g.beginPath(); g.arc(lx, ly, 8, 0, 7); g.stroke();
-    if (opts.spark) { cv.classList.add('drawn'); return; }
-    const snap = g.getImageData(0, 0, cv.width, cv.height);
-    // scrub
-    const lab = opts.scrub; let lastI = -1;
-    const move = (ev) => { const r = cv.getBoundingClientRect(); const x = (ev.clientX - r.left); let i = 0, best = 1e9;
-      pts.forEach((p, j) => { const d = Math.abs(X(p[0], j) - x); if (d < best) { best = d; i = j; } });
-      g.putImageData(snap, 0, 0); const px_ = X(pts[i][0], i), py = Y(pts[i][1]);
-      g.strokeStyle = 'rgba(255,255,255,.25)'; g.lineWidth = 1; g.beginPath(); g.moveTo(px_, 0); g.lineTo(px_, h); g.stroke();
-      g.fillStyle = '#fff'; g.beginPath(); g.arc(px_, py, 4, 0, 7); g.fill();
-      if (lab) { lab.innerHTML = `<b class="num">${esc(opts.fmt ? opts.fmt(pts[i][1]) : nf(pts[i][1]))}</b><br>${esc(ist(pts[i][0], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }))} IST`; lab.classList.add('on'); }
-      if (i !== lastI && i % 8 === 0) H('light'); lastI = i; };
-    const end = () => { g.putImageData(snap, 0, 0); lab && lab.classList.remove('on'); };
-    cv.onpointerdown = (e) => { move(e); }; cv.onpointermove = (e) => { if (e.pointerType === 'mouse' || e.buttons) move(e); }; cv.onpointerleave = end; cv.onpointerup = () => setTimeout(end, 900);
+  function quote(sym) { const w = W(); if (!w) return null; for (const g of Object.values(w.quotes || {})) for (const q of g) if (q.s === sym) return q; return null; }
+  function stats(d) {
+    const m = d.metrics || {}; const tr = (d.trades || []).filter(t => t.exit != null || t.status === 'closed');
+    const wins = tr.filter(t => t.pnl > 0), losses = tr.filter(t => t.pnl < 0);
+    const avg = (a) => a.length ? a.reduce((s, t) => s + t.pnl, 0) / a.length : null;
+    const dl = d.daily || []; const rets = []; for (let i = 1; i < dl.length; i++) if (dl[i - 1].eq) rets.push(dl[i].chg / dl[i - 1].eq);
+    const mean = rets.length ? rets.reduce((a, b) => a + b, 0) / rets.length : 0;
+    const sd = rets.length > 1 ? Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / (rets.length - 1)) : 0;
+    const dsd = rets.length > 1 ? Math.sqrt(rets.reduce((a, b) => a + Math.min(0, b) ** 2, 0) / (rets.length - 1)) : 0;
+    let peak = -Infinity, mdd = 0; (d.curve || []).forEach(([, v]) => { peak = Math.max(peak, v); if (peak > 0) mdd = Math.min(mdd, (v - peak) / peak * 100); });
+    const cur = (d.curve || []).length ? d.curve[d.curve.length - 1][1] : null; let pk = -Infinity; (d.curve || []).forEach(([, v]) => pk = Math.max(pk, v));
+    return { n: m.trades, wr: m.win_rate, pf: m.profit_factor, exp: m.expectancy, mdd: ok(m.max_dd_pct) ? m.max_dd_pct : mdd, curdd: cur && pk > 0 ? (cur - pk) / pk * 100 : null,
+      sharpe: sd > 0 && rets.length >= 3 ? mean / sd * Math.sqrt(252) : null, sortino: dsd > 0 && rets.length >= 3 ? mean / dsd * Math.sqrt(252) : null, ndays: rets.length,
+      avgW: avg(wins), avgL: avg(losses), best: tr.length ? Math.max(...tr.map(t => t.pnl || 0)) : null, worst: tr.length ? Math.min(...tr.map(t => t.pnl || 0)) : null,
+      hold: m.avg_hold_s, charges: m.charges, realized: m.realized, payoff: avg(wins) && avg(losses) ? Math.abs(avg(wins) / avg(losses)) : null };
+  }
+  function riskOf(p, cfg) {
+    cfg = cfg || {}; const hs = parseFloat(cfg['Hard stop']) || -8, arm = parseFloat(cfg['Trail arms']) || 15, td = parseFloat(cfg['Trail distance']) || 8;
+    const long = String(p.side || 'LONG').toUpperCase() !== 'SHORT'; const e = p.entry, l = ok(p.last) ? p.last : e, peak = ok(p.peak) ? p.peak : e;
+    let stop, tgt; if (long) { stop = p.trail ? peak * (1 - td / 100) : e * (1 + hs / 100); tgt = p.trail ? null : e * (1 + arm / 100); }
+    else { stop = p.trail ? peak * (1 + td / 100) : e * (1 - hs / 100); tgt = p.trail ? null : e * (1 - arm / 100); }
+    return { stop, tgt, toStop: l ? (long ? (l - stop) / l : (stop - l) / l) * 100 : null, toTgt: tgt == null || !l ? null : (long ? (tgt - l) / l : (l - tgt) / l) * 100, trail: !!p.trail };
+  }
+  function posRows(list) {
+    return list.map(({ p, b }) => { const r = riskOf(p, b.d.config); const pv = b.k === 'meme' ? memeInr(p.pnl) : p.pnl; const nm = p.option_type ? `${p.underlying || ''} ${nf(p.strike)} ${p.option_type}` : (p.symbol || p.underlying);
+      return `<tr><td class="n">${esc(nm)}<small>${b.tag} · ${esc((p.side || '').toLowerCase())}${r.trail ? ' · trailing' : ''}</small></td><td>${nf(p.qty, p.qty < 10 ? 2 : 0)}</td><td>${px(p.entry)}</td><td>${px(p.last)}</td>
+        <td class="${cls(pv)}">${sInrS(pv)}<small class="${cls(p.pnl_pct)}"> ${pct(p.pnl_pct, 1)}</small></td><td class="${r.toStop < 2 ? 'dn' : 'tx2'}">${pct(r.toStop, 1)}</td><td class="tx2">${r.toTgt == null ? '<span class="gold">trail</span>' : pct(r.toTgt, 1)}</td></tr>`; });
+  }
+  const POSCOLS = [['Position', 'l'], 'Qty', 'Entry', 'LTP', 'P&L', 'To stop', 'To tgt'];
+  function sumCurves(B, key) {
+    const series = B.map(b => (b.d[key] || []).map(([t, v]) => [t, b.conv(v)])).filter(s => s.length);
+    if (!series.length) return []; const ts = [...new Set(series.flatMap(s => s.map(p => p[0])))].sort((a, b) => a - b);
+    const idx = series.map(() => 0), last = series.map(s => s[0][1]);
+    return ts.map(t => { series.forEach((s, i) => { while (idx[i] < s.length && s[idx[i]][0] <= t) { last[i] = s[idx[i]][1]; idx[i]++; } }); return [t, last.reduce((a, b) => a + (b || 0), 0)]; });
   }
 
-  const hexRgb = (h) => { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(x => x + x).join(''); const n = parseInt(h, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(','); };
-  const ACC = { eq: ['#3d8bff', '#7cc4ff'], opt: ['#ff3dcb', '#ff9bf0'], meme: ['#b8ff3c', '#9b5cff'], gold: ['#ffc53d', '#ff8a3d'] };
-  const SPC = { cricket: '#19e3c4', soccer: '#2ee66b', nba: '#ff8a1f', nfl: '#ff3b3b', nhl: '#8fe3ff', tennis: '#ffe23d', f1: '#e10600', ncaaf: '#ff6b3d', ncaab: '#ff9f43', mma: '#ff2e63', golf: '#7bd88f', mlb: '#4fa3ff' };
-  const spc = (k) => SPC[k] ? 'sp-' + k : 'sp-other';
-  function confetti() { const cv = $('#confetti'); if (!cv || matchMedia('(prefers-reduced-motion:reduce)').matches) return; const dpr = devicePixelRatio || 1; cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
-    const cols = ['#34f5a4', '#7cf3ff', '#8b7bff', '#ff6ad5', '#ffc53d', '#b8ff3c']; const P = Array.from({ length: 140 }, () => ({ x: innerWidth / 2 + (Math.random() - .5) * 80, y: 170, vx: (Math.random() - .5) * 11, vy: -Math.random() * 12 - 4, s: 4 + Math.random() * 6, r: Math.random() * 6, vr: (Math.random() - .5) * .3, c: cols[(Math.random() * cols.length) | 0] }));
-    let f = 0; const step = () => { g.clearRect(0, 0, innerWidth, innerHeight); P.forEach(p => { p.vy += .32; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.r += p.vr; g.save(); g.translate(p.x, p.y); g.rotate(p.r); g.fillStyle = p.c; g.globalAlpha = Math.max(0, 1 - f / 140); g.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2); g.restore(); }); if (++f < 150) requestAnimationFrame(step); else g.clearRect(0, 0, innerWidth, innerHeight); }; requestAnimationFrame(step); H('success'); }
-  let celebrated = false;
-
-  /* ── count-up ── */
-  function countUp(el, to, fmt, ms = 900) {
-    const from = +(el.dataset.v || 0); el.dataset.v = to; const t0 = performance.now();
-    const step = (t) => { const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 4); el.textContent = fmt(from + (to - from) * e); if (k < 1) requestAnimationFrame(step); };
-    requestAnimationFrame(step);
+  /* ── chart (canvas, hairline) ── */
+  function chart(cv, pts, o = {}) {
+    if (!cv || !pts || pts.length < 2) { if (cv) cv.parentElement.innerHTML = empty(o.emptyMsg || 'Not enough points yet'); return; }
+    const dpr = Math.min(3, devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight; cv.width = w * dpr; cv.height = h * dpr;
+    const g = cv.getContext('2d'); g.scale(dpr, dpr); const ys = pts.map(p => p[1]); const base = o.base;
+    let lo = Math.min(...ys, base ?? Infinity), hi = Math.max(...ys, base ?? -Infinity); if (hi === lo) { hi += Math.abs(hi) * .001 || 1; lo -= Math.abs(lo) * .001 || 1; }
+    const pad = (hi - lo) * .14; lo -= pad; hi += pad; const N = pts.length - 1, L = 14, R = 50, TOP = 10, BOT = 16;
+    const X = (i) => L + i / N * (w - L - R), Y = (y) => TOP + (1 - (y - lo) / (hi - lo)) * (h - TOP - BOT);
+    const col = o.color || (ys[N] >= (base ?? ys[0]) ? UP : DN); const fmt = o.fmt || ((v) => nf(v));
+    g.font = '9.5px GeistMono, ui-monospace, monospace'; g.textAlign = 'right'; g.textBaseline = 'middle';
+    for (let k = 0; k <= 3; k++) { const v = lo + pad + (hi - lo - 2 * pad) * k / 3, y = Y(v); g.strokeStyle = 'rgba(255,255,255,.045)'; g.lineWidth = 1; g.beginPath(); g.moveTo(L, Math.round(y) + .5); g.lineTo(w - R + 6, Math.round(y) + .5); g.stroke(); g.fillStyle = '#55555e'; g.fillText(o.axis ? o.axis(v) : fmt(v), w - 4, y); }
+    if (o.times) { g.textAlign = 'left'; g.fillStyle = '#55555e'; g.textBaseline = 'alphabetic'; const tf = (t) => ist(t, o.times); g.fillText(tf(pts[0][0]), L, h - 3); g.textAlign = 'right'; g.fillText(tf(pts[N][0]), w - R, h - 3); }
+    if (base != null) { g.setLineDash([2, 4]); g.strokeStyle = 'rgba(205,178,124,.35)'; g.beginPath(); g.moveTo(L, Y(base)); g.lineTo(w - R + 6, Y(base)); g.stroke(); g.setLineDash([]); }
+    const path = () => { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(i), Y(p[1])) : g.moveTo(X(i), Y(p[1]))); };
+    const grd = g.createLinearGradient(0, TOP, 0, h - BOT); grd.addColorStop(0, col + '26'); grd.addColorStop(1, col + '00');
+    path(); g.lineTo(X(N), h - BOT); g.lineTo(X(0), h - BOT); g.closePath(); g.fillStyle = grd; g.fill();
+    path(); g.strokeStyle = col; g.lineWidth = 1.25; g.lineJoin = 'round'; g.stroke();
+    g.fillStyle = col; g.beginPath(); g.arc(X(N), Y(ys[N]), 2.4, 0, 7); g.fill();
+    const snap = g.getImageData(0, 0, cv.width, cv.height); const lab = o.scrub; let lastI = -1;
+    const move = (ev) => { const r = cv.getBoundingClientRect(); const i = Math.max(0, Math.min(N, Math.round((ev.clientX - r.left - L) / (w - L - R) * N)));
+      g.putImageData(snap, 0, 0); const x = X(i), y = Y(pts[i][1]); g.strokeStyle = 'rgba(255,255,255,.18)'; g.lineWidth = 1; g.beginPath(); g.moveTo(Math.round(x) + .5, TOP); g.lineTo(Math.round(x) + .5, h - BOT); g.stroke();
+      g.fillStyle = '#ececee'; g.beginPath(); g.arc(x, y, 2.6, 0, 7); g.fill();
+      if (lab) { lab.innerHTML = `<b>${esc(fmt(pts[i][1]))}</b>  ${esc(ist(pts[i][0], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }))} IST`; lab.classList.add('on'); }
+      if (i !== lastI && i % 10 === 0) H('light'); lastI = i; };
+    const end = () => { g.putImageData(snap, 0, 0); lab && lab.classList.remove('on'); };
+    cv.onpointerdown = move; cv.onpointermove = (e) => { if (e.pointerType === 'mouse' || e.buttons) move(e); }; cv.onpointerleave = end; cv.onpointerup = () => setTimeout(end, 1200);
   }
 
   /* ════════ VIEWS ════════ */
   const V = {};
 
-  V.home = () => {
-    const B = books(); const net = B.reduce((a, b) => a + b.eq, 0), start = B.reduce((a, b) => a + b.start, 0);
-    const today = B.reduce((a, b) => a + (b.today || 0), 0), pnl = net - start, ppct = start ? pnl / start * 100 : 0;
-    const lm = D.live_money || {};
-    const maxPct = Math.max(5, ...B.map(b => Math.abs(b.pct || 0)));
-    let cells = B.map((b, i) => `<a class="cell tap h2 w2 book-tile acc-${b.k}" data-jump="desks:${b.k}" data-css="${css({ background: `linear-gradient(150deg,${ACC[b.k][0]}55,${tint(b.pct, maxPct)} 55%,rgba(255,255,255,.02))`, 'animation-delay': i * 60 + 'ms' })}"><b>${b.tag}</b><span class="${cls(b.pct)}">${pct(b.pct)}<br><small class="muted">${inrS(b.pnl)}</small></span><i class="bar2"></i></a>`);
-    const und = [].concat(...['eq', 'opt'].map(k => (desk(k) || {}).per_underlying || [])).reduce((m, a) => { const x = m[a.u] || (m[a.u] = { u: a.u, pnl: 0, n: 0 }); x.pnl += a.pnl; x.n += a.n; return m; }, {});
-    const U = Object.values(und).sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl)).slice(0, 10); const mu = Math.max(1, ...U.map(u => Math.abs(u.pnl)));
-    cells = cells.concat(U.map((u, i) => `<div class="cell ${i < 2 ? 'w2' : ''}" data-css="${css({ background: `linear-gradient(150deg,${tint(u.pnl, mu)},rgba(255,255,255,.02))`, 'animation-delay': (180 + i * 40) + 'ms' })}"><b>${esc(u.u)}</b><span class="${cls(u.pnl)}">${inrS(u.pnl)}</span></div>`));
-    // daily strip
-    const days = {}; B.forEach(b => (b.d.daily || []).forEach(x => { days[x.d] = (days[x.d] || 0) + (b.k === 'meme' ? memeInr(x.chg) : x.chg); }));
-    const DK = Object.keys(days).sort().slice(-12); const md = Math.max(1, ...DK.map(k => Math.abs(days[k])));
-    const strip = DK.map((k, i) => `<div><i class="${days[k] < 0 ? 'neg' : ''}" data-css="${css({ height: Math.max(3, Math.abs(days[k]) / md * 70) + 'px', opacity: days[k] ? 1 : .25, 'animation-delay': i * 40 + 'ms' })}"></i><span>${esc(k.slice(8))}</span></div>`).join('');
-    const al = alerts();
-    return `<div class="wide"><div>
-      <section class="card glow hero acc-aur" id="hero">
-        <span class="paper">PAPER</span>
-        <div class="lbl">Net worth · all books</div>
-        <div class="big num grad-aur" id="nw">${inr(net)}</div>
-        <div class="chips">
-          <span class="chip ${cls(Math.round(today))}">Today ${sInr(today)}</span>
-          <span class="chip ${cls(pnl)}">All-time ${sInr(pnl)} · ${pct(ppct)}</span>
-          <span class="chip gold">Live ₹${nf(lm.used_inr || 0)} / ₹${nf(lm.cap_inr || 2000)}</span>
-        </div>
-        <canvas class="spark" id="hspark"></canvas>
-      </section>
-      ${head('Heat', 'books + top names by P&L')}
-      <div class="heat">${cells.join('') || '<div class="sk"></div>'}</div>
-      ${head('Daily P&L', 'last ' + DK.length + ' days · INR')}
-      <div class="card"><div class="days">${strip || empty('·', 'No history yet')}</div></div>
-    </div><div>
-      ${head('Alerts', al.length + ' now')}
-      <div class="card alerts"><div class="list">${al.map(a => ext(a.href, `<i class="dot ${a.lvl}"></i><div class="t"><b>${esc(a.t)}</b><span>${esc(a.s || '')}</span></div>`, 'li tap' + (a.jump ? '" data-jump="' + a.jump : ''))).join('') || empty('✓', 'All quiet')}</div></div>
-      ${head('Books')}
-      <div class="booksx">${B.map(b => `<a class="card book tap acc-${b.k}" data-jump="desks:${b.k}"><span class="bt">${b.tag}</span><div><b>${b.name}</b><canvas data-spark="${b.k}"></canvas></div><div class="bv">${inrS(b.eq)}<small class="${cls(b.pct)}">${pct(b.pct)}</small></div></a>`).join('')}</div>
-    </div></div>`;
-  };
-  V.home.after = (root) => { const B = books(); const el = $('#nw', root); if (el) { const v = B.reduce((a, b) => a + b.eq, 0); el.dataset.v = v * 0.96; countUp(el, v, (x) => inr(x)); }
-    $$('canvas[data-spark]', root).forEach(cv => { const b = B.find(x => x.k === cv.dataset.spark); if (b) chart(cv, b.d.curve, { base: b.d.start, spark: 1, c1: ACC[b.k][0], c2: ACC[b.k][1], lw: 2 }); });
-    const days = {}; B.forEach(b => (b.d.daily || []).forEach(x => { days[x.d] = (days[x.d] || 0) + (b.k === 'meme' ? memeInr(x.eq) : x.eq); }));
-    const DK = Object.keys(days).sort(); const hs = $('#hspark', root); if (hs && DK.length > 1) chart(hs, DK.map((k, i) => [i, days[k]]), { spark: 1, c1: '#ff6ad5', c2: '#7cf3ff', lw: 2.6 });
-    const today = B.reduce((a, b) => a + (b.today || 0), 0); if (today >= 1 && !celebrated) { celebrated = true; $('#hero', root).classList.add('celebrate'); setTimeout(confetti, 500); } };
-
   function alerts() {
-    const A = [], m = D.markets || {}, f = D.fno || {}, n = D.news || {}, lm = D.live_money || {}, br = D.breakouts || {};
-    const age = Date.now() / 1000 - (D.ts || 0);
-    if (age > 900) A.push({ lvl: 'warm', t: 'Data is ' + ago(D.ts) + ' old', s: 'The box may be asleep. It publishes again when it wakes.' });
-    const open = m.session && m.session.open;
-    ['eq', 'opt'].forEach(k => { const d = desk(k); if (open && d && !d.running) A.push({ lvl: 'hot', t: (k === 'eq' ? 'Equity' : 'Options') + ' desk is not running', s: 'Market is open', jump: 'desks:' + k }); });
-    const vix = m.indices && m.indices.VIX; if (vix && Math.abs(vix.change_pct) >= 5) A.push({ lvl: 'warm', t: 'India VIX ' + pct(vix.change_pct), s: 'at ' + nf(vix.ltp, 2), jump: 'pulse:markets' });
-    if (f.preferred_expiry) { const dd = (Date.parse(f.preferred_expiry.replace(/-/g, ' ')) - Date.now()) / 864e5; if (dd > -1 && dd < 2) A.push({ lvl: 'warm', t: 'Nifty expiry ' + f.preferred_expiry, s: 'Max pain ' + nf(f.chain && f.chain.max_pain) + ' · PCR ' + ((f.chain && f.chain.pcr_oi) || 0).toFixed(2), jump: 'pulse:fno' }); }
-    if ((br.breakouts || []).length) A.push({ lvl: 'cool', t: br.breakouts.length + ' breakouts in the Nifty 200', s: br.breakouts.slice(0, 4).map(b => b.symbol).join(' · '), jump: 'pulse:breakouts' });
-    const mm = desk('meme'); if (mm && (mm.positions || []).length) A.push({ lvl: 'cool', t: 'Meme desk holds ' + mm.positions.map(p => p.symbol).join(', '), s: 'open paper position', jump: 'desks:meme' });
-    (n.flagged || []).slice(0, 3).forEach(x => A.push({ lvl: 'warm', t: x.title, s: x.source + ' · ' + ago(x.ts) + ' ago', href: x.link }));
-    A.push({ lvl: lm.armed ? 'hot' : 'ok', t: lm.armed ? 'LIVE MONEY ARMED' : 'Live Money disarmed', s: lm.armed ? 'real orders possible' : 'no real order can leave the box', jump: 'money' });
+    const A = []; const w = W(); const L = D.live_money || {};
+    if (L.armed) A.push({ lvl: 'd', t: 'Live Money is ARMED', s: 'Real orders can leave the box', jump: 'money' });
+    if (w && w.risk && w.risk.level <= 2) A.push({ lvl: 'd', t: `Global risk level ${w.risk.level} of 5`, s: `score ${w.risk.score}/100 · ${w.risk.high6h || 0} high-severity headlines in 6h`, jump: 'world:monitor' });
+    (w && w.chokepoints || []).filter(c => c.level !== 'NORMAL').forEach(c => A.push({ lvl: c.level === 'HIGH' ? 'd' : 'a', t: `${c.name}: ${c.level.toLowerCase()}`, s: (c.latest && c.latest.title) || `${c.hits} headlines in 24h`, href: c.latest && c.latest.link }));
+    const vix = (D.markets && D.markets.indices || {}).VIX; if (vix && Math.abs(vix.change_pct) >= 5) A.push({ lvl: 'a', t: `India VIX ${pct(vix.change_pct)}`, s: `at ${nf(vix.ltp, 2)}`, jump: 'pulse:fno' });
+    const uv = quote('^VIX'); if (uv && uv.p >= 25) A.push({ lvl: 'a', t: `CBOE VIX ${nu(uv.p)}`, s: `${pct(uv.cp)} · US risk-off`, jump: 'world:global' });
+    const f = D.fiidii && D.fiidii.days && D.fiidii.days[0]; if (f && f.FII) A.push({ lvl: f.FII.net >= 0 ? 'u' : 'd', t: `FII ${f.FII.net >= 0 ? 'bought' : 'sold'} ₹${nf(Math.abs(f.FII.net))} cr`, s: `${f.d} · DII ${sg(f.DII && f.DII.net, 0)} cr`, jump: 'pulse:flows' });
+    const bo = D.breakouts || {}; if ((bo.breakouts || []).length) A.push({ lvl: 'g', t: `${bo.breakouts.length} breakouts · ${(bo.near || []).length} near`, s: (bo.breakouts || []).slice(0, 4).map(b => b.symbol).join(' · '), jump: 'pulse:breakouts' });
+    for (const k of ['cricket', 'nfl', 'nba', 'soccer']) { const g = ((sportData(k) || {}).games || []).find(g => g.state === 'in' && (k !== 'cricket' || /india/i.test(g.name + JSON.stringify(g.competitors || [])))); if (g) A.push({ lvl: 'live', t: `${(g.competitors || []).map(c => c.abbr || c.name).join(' v ')} live`, s: g.detail || '', jump: 'sports:' + k }); }
+    if (Date.now() / 1000 - D.ts > 900) A.push({ lvl: 'a', t: 'Vault is ' + ago(D.ts) + ' old', s: 'The box pusher may be paused' });
     return A;
   }
+  const alertList = (al) => al.map(a => ext(a.href, `<i class="dot ${a.lvl}"></i><div class="t"><b>${esc(a.t)}</b><span>${esc(a.s || '')}</span></div>`, 'li' + (a.jump ? '" data-jump="' + a.jump : ''))).join('') || empty('All quiet');
 
-  V.desks = () => {
-    const k = sub.desks, d = desk(k); const seg = segHtml('desks', [['eq', 'Equity'], ['opt', 'Options'], ['meme', 'Meme']]);
-    if (!d) return seg + `<div class="card">${empty('○', 'This desk has not reported yet.')}</div>`;
-    const meme = k === 'meme', f = meme ? (v) => nf(v, 3) + ' SOL' : (v) => inr(v), fS = meme ? (v) => (v > 0 ? '+' : '') + nf(v, 3) + ' SOL' : sInr;
-    const m = d.metrics || {}; const ex = d.exits || {}; const exMax = Math.max(1, ...Object.values(ex).map(x => Math.abs(x.pnl)));
-    const hb = Object.entries(d.heartbeat || {}).map(([n, h]) => { const a = Date.now() / 1000 - (h.ts || 0); const c = a < 180 ? 'var(--up)' : a < 3600 ? 'var(--amber)' : 'var(--dim)';
-      return `<div class="agent"><i data-css="${css({ background: c })}"></i><b>${esc(n)}</b><em>${esc(h.status || '')}</em></div>`; }).join('');
-    const tr = (t) => `<div class="li"><span class="side ${t.side === 'SHORT' ? 'S' : 'L'}">${t.side === 'SHORT' ? 'S' : 'L'}</span><div class="t"><b>${esc(t.symbol)}</b><span>${ist(t.entry_ts, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}${t.exit_ts ? ' → ' + ist(t.exit_ts) : ''} · ${esc((t.exit_kind || t.status || '').replace(/_/g, ' '))}</span></div><div class="v ${cls(t.pnl)}">${meme ? fS(t.pnl) : sInr(t.pnl)}<small class="${cls(t.pnl_pct)}">${pct(t.pnl_pct, 1)}</small></div></div>`;
-    return seg + `<div class="wide"><div>
-      <section class="card glow acc-${k}" id="dcard">
-        <span class="paper">${esc(d.mode || 'PAPER')}</span>
-        <div class="lbl">${k === 'eq' ? 'Equity book · NSE' : k === 'opt' ? 'Options book · NSE F&O' : 'Meme book · Solana'}</div>
-        <div class="big num grad">${f(d.equity)}</div>
-        <div class="row"><span class="chip ${cls(d.pnl)}">${fS(d.pnl)} · ${pct(d.pnl_pct)}</span><span class="chip ${cls(meme ? d.today : Math.round(d.today))}">Today ${fS(d.today)}</span>${meme ? `<span class="chip">${inrS(memeInr(d.equity))}</span>` : ''}</div>
-        <div class="chartw"><div class="scrub" id="scrub"></div><canvas class="chart" id="cv"></canvas></div>
+  V.home = () => {
+    const B = books(); const net = B.reduce((a, b) => a + (b.eq || 0), 0), start = B.reduce((a, b) => a + (b.start || 0), 0);
+    const today = B.reduce((a, b) => a + (b.today || 0), 0), pnl = net - start, ppct = start ? pnl / start * 100 : 0; const lm = D.live_money || {};
+    const S = B.map(b => ({ b, s: stats(b.d) })); const tr = S.reduce((a, x) => a + (x.s.n || 0), 0);
+    const wr = tr ? S.reduce((a, x) => a + (x.s.wr || 0) * (x.s.n || 0), 0) / tr : null; const worst = Math.min(0, ...S.map(x => x.s.mdd || 0));
+    const pos = B.flatMap(b => (b.d.positions || []).map(p => ({ p, b })));
+    const days = {}; B.forEach(b => (b.d.daily || []).forEach(x => { days[x.d] = (days[x.d] || 0) + (b.conv(x.chg) || 0); }));
+    const DK = Object.keys(days).sort().slice(-14); const md = Math.max(1, ...DK.map(k => Math.abs(days[k])));
+    const mk = [['^NSEI', 'Nifty 50'], ['^NSEBANK', 'Bank Nifty'], ['^INDIAVIX', 'India VIX'], ['USDINR=X', 'USD/INR'], ['BZ=F', 'Brent'], ['GC=F', 'Gold'], ['ES=F', 'S&P fut'], ['^TNX', 'US 10Y']].map(([s, n]) => { const q = quote(s); return q ? `<tr><td class="n">${n}</td><td>${px(q.p)}</td><td class="${cls(q.cp)}">${pct(q.cp)}</td><td>${spark(q.sp)}</td></tr>` : ''; }).filter(Boolean);
+    ['BTC', 'ETH'].forEach(c => { const x = Live.px[c] || ((D.crypto || {}).prices || {})[c]; if (x) mk.push(`<tr data-c="${c}"><td class="n">${c}</td><td class="px">${px(x.price)}</td><td class="chg ${cls(x.change_pct)}">${pct(x.change_pct)}</td><td><span class="dim">live</span></td></tr>`); });
+    const al = alerts();
+    return `<div class="cols c3"><div>
+      <section class="p hero" id="hero">
+        <div class="row1"><div><div class="lbl">Net worth · all books</div><div class="big">${inr(net)}</div></div>${tag('Paper', 'g')}</div>
+        <div class="sub"><span>Today <b class="${cls(Math.round(today))}">${sInr(today)}</b></span><span>All-time <b class="${cls(pnl)}">${sInr(pnl)} · ${pct(ppct)}</b></span><span>Live <b class="gold">${inr(lm.used_inr || 0)} / ${inr(lm.cap_inr || 2000)}</b></span></div>
+        <div class="chartw"><canvas id="hc"></canvas><div class="scrub" id="hcs"></div></div>
       </section>
-      <div class="kv acc-${k}">
-        <div><span class="lbl">Win rate</span><b>${nf(m.win_rate, 1)}%</b></div>
-        <div><span class="lbl">Profit f.</span><b class="${(m.profit_factor || 0) >= 1 ? 'up' : 'down'}">${m.profit_factor == null ? '—' : (+m.profit_factor).toFixed(2)}</b></div>
-        <div><span class="lbl">Max DD</span><b class="down">${pct(m.max_dd_pct, 1)}</b></div>
-        <div><span class="lbl">Trades</span><b>${nf(m.trades)}</b></div>
-        <div><span class="lbl">Expect.</span><b class="${cls(m.expectancy)}">${meme ? nf(m.expectancy, 3) : inrS(m.expectancy)}</b></div>
-        <div><span class="lbl">Charges</span><b>${meme ? nf(m.charges, 3) : inrS(m.charges)}</b></div>
-      </div>
-      ${Object.keys(ex).length ? head('Exits', 'P&L by exit reason') + `<div class="card">${Object.entries(ex).sort((a, b) => b[1].pnl - a[1].pnl).map(([r, x]) => `<div class="lb"><span class="rk">${x.n}</span><div><b class="muted">${esc(r.replace(/_/g, ' ').toLowerCase())}</b><div class="bar ${x.pnl < 0 ? 'down' : ''}"><i data-css="${css({ width: (Math.abs(x.pnl) / exMax * 100).toFixed(1) + '%' })}"></i></div></div><span class="vol ${cls(x.pnl)}">${meme ? nf(x.pnl, 3) : inrS(x.pnl)}</span></div>`).join('')}</div>` : ''}
+      <div class="p"><div class="kpis">
+        <div><div class="lbl">Today</div><div class="v ${cls(Math.round(today))}">${sInrS(today)}</div></div>
+        <div><div class="lbl">Return</div><div class="v ${cls(ppct)}">${pct(ppct)}</div></div>
+        <div><div class="lbl">Win rate</div><div class="v">${ok(wr) ? wr.toFixed(1) + '%' : '—'}</div></div>
+        <div class="last-row"><div class="lbl">Trades</div><div class="v">${nf(tr)}</div></div>
+        <div class="last-row"><div class="lbl">Worst DD</div><div class="v dn">${pct(worst, 1)}</div></div>
+        <div class="last-row"><div class="lbl">Open</div><div class="v">${pos.length}</div></div>
+      </div></div>
+      ${head('Books', 'paper · INR')}
+      ${P(T([['Book', 'l'], 'Equity', 'Today', 'Total', 'Win', 'PF', 'Max DD'], S.map(({ b, s }) => `<tr class="tap" data-jump="desks:${b.k}"><td class="n">${b.name}<small>${(b.d.positions || []).length} open · ${b.d.running ? 'running' : 'idle'}</small></td><td>${inrS(b.eq)}</td><td class="${cls(b.today)}">${sInrS(b.today)}</td><td class="${cls(b.pct)}">${pct(b.pct)}</td><td>${ok(s.wr) ? s.wr.toFixed(0) + '%' : '—'}</td><td>${ok(s.pf) ? s.pf.toFixed(2) : '—'}</td><td class="dn">${pct(s.mdd, 1)}</td></tr>`), 'No books reporting'))}
+      ${head('Open positions', pos.length + ' across books')}
+      ${P(T(POSCOLS, posRows(pos), 'No open positions'))}
+      ${head('Daily P&L', 'last ' + DK.length + ' sessions')}
+      ${P(DK.length ? `<div class="days">${DK.map(k => { const v = days[k]; return `<div title="${esc(k)}"><i class="${v < 0 ? 'neg ng' : 'pos'}" data-css="${css({ height: Math.max(1, Math.abs(v) / md * 38) + 'px', opacity: v ? 1 : .3 })}"></i><span>${esc(k.slice(8))}</span></div>`; }).join('')}</div>` : empty('No history yet'))}
     </div><div>
-      ${head('Agents', d.running ? 'running' : 'idle')}
-      <div class="agents">${hb || empty('○', 'No heartbeat')}</div>
-      ${head('Open', (d.positions || []).length + ' positions')}
-      <div class="card"><div class="list">${(d.positions || []).map(p => `<div class="li"><span class="side L">${p.side === 'SHORT' ? 'S' : 'L'}</span><div class="t"><b>${esc(p.symbol)}</b><span>entry ${px(p.entry)} · last ${px(p.last)}</span></div><div class="v ${cls((p.last - p.entry) * (p.side === 'SHORT' ? -1 : 1))}">${pct((p.last / p.entry - 1) * 100 * (p.side === 'SHORT' ? -1 : 1), 1)}</div></div>`).join('') || empty('∅', 'Flat. No open positions.')}</div></div>
-      ${head('Trades', 'latest ' + Math.min(25, (d.trades || []).length))}
-      <div class="card"><div class="list">${(d.trades || []).slice(0, 25).map(tr).join('') || empty('∅', 'No trades yet')}</div></div>
+      ${head('Alerts', al.length + ' now')}
+      ${P(alertList(al))}
+      ${head('Markets', '<a data-jump="pulse:overview">more →</a>')}
+      ${P(T([['Instrument', 'l'], 'Last', 'Chg', ''], mk, 'World Monitor offline'))}
+      ${src('Vault sealed ' + (D.ist || '') + ' · desks, World Monitor, NSE')}
     </div></div>`;
   };
-  V.desks.after = (root) => { const d = desk(sub.desks); if (d) chart($('#cv', root), d.curve, { base: d.start, c1: ACC[sub.desks][0], c2: ACC[sub.desks][1], lw: 2.6, scrub: $('#scrub', root), fmt: sub.desks === 'meme' ? (v) => nf(v, 3) + ' SOL' : (v) => inr(v) }); };
+  V.home.after = (root) => { const B = books(); const pts = sumCurves(B, 'intraday'); const all = pts.length >= 2 ? pts : sumCurves(B, 'curve');
+    chart($('#hc', root), all, { base: all.length ? all[0][1] : null, fmt: (v) => inr(v), axis: (v) => inrS(v), scrub: $('#hcs', root), times: { hour: '2-digit', minute: '2-digit', hour12: false }, emptyMsg: 'Equity curve appears once the books report' }); };
 
-  /* ── pulse ── */
-  V.pulse = () => segHtml('pulse', [['markets', 'Markets'], ['fno', 'F&O'], ['breakouts', 'Breakouts'], ['crypto', 'Crypto'], ['news', 'News']]) + (P[sub.pulse] || P.markets)();
-  V.pulse.after = (root) => { if (sub.pulse === 'crypto') paintCoins(); };
-  const P = {};
-  P.markets = () => {
-    const m = D.markets || {}; const I = m.indices || {}; const s = m.session || {}; const b = m.breadth || {};
-    const IDXC = { Nifty: 'acc-eq', BankNifty: 'acc-opt', FinNifty: 'sp-cricket', VIX: 'acc-gold' }; const idx = ['Nifty', 'BankNifty', 'FinNifty', 'VIX'].filter(k => I[k]).map(k => { const x = I[k]; const p = x.high > x.low ? (x.ltp - x.low) / (x.high - x.low) * 100 : 50;
-      return `<div class="card idx tap ${IDXC[k]}"><div class="lbl">${esc(x.name)}</div><div class="mid num grad">${nf(x.ltp, 2)}</div><div class="row"><span class="chip ${cls(x.change)}">${pct(x.change_pct)}</span><span class="num muted">${x.change > 0 ? '+' : ''}${nf(x.change, 2)}</span></div>
-      <div class="range"><i data-css="${css({ left: p.toFixed(1) + '%' })}"></i></div><div class="range-l"><span>${nf(x.low, 0)}</span><span>day</span><span>${nf(x.high, 0)}</span></div></div>`; }).join('');
-    const tot = (b.advances || 0) + (b.declines || 0) + (b.unchanged || 0) || 1;
-    const L = ((m.movers || {}).lists || {}); const pick = L.NIFTY || L.allSec || {}; const mv = (arr, up) => (arr || []).slice(0, 6).map(x => `<div class="li"><div class="t"><b>${esc(x.symbol)}</b><span>vol ${esc(x.volume || '')}</span></div><div class="v">${nf(x.ltp, 2)}<small class="${up ? 'up' : 'down'}">${pct(x.change_pct)}</small></div></div>`).join('');
-    const rc = m.recap || {};
-    return `<div class="row"><span class="chip ${s.open ? 'up' : ''}">${s.open ? '● Market open' : '○ Closed · ' + esc(s.reason || '')}</span><span class="sp"></span><small class="muted num">last ${esc(s.last_session || '')}</small></div>
-      ${rc.headline ? `<div class="card" data-css="${css({ 'margin-top': '10px' })}"><div class="lbl">Session recap</div><div data-css="${css({ font: '600 15px/1.35 var(--sans)', 'margin-top': '6px' })}">${esc(rc.headline)}</div><div class="note" data-css="${css({ 'margin-top': '4px' })}">${esc(rc.summary || '')}</div></div>` : ''}
-      ${head('Indices', m.ist ? 'as of ' + esc(m.ist.slice(11, 16)) + ' IST' : '')}<div class="grid g2">${idx || '<div class="sk" data-css="height:120px"></div>'}</div>
-      ${head('Breadth', nf(b.advances) + ' up · ' + nf(b.declines) + ' down')}<div class="card"><div class="breadth"><i data-css="${css({ width: (b.advances / tot * 100) + '%', background: 'var(--up)' })}"></i><i data-css="${css({ width: (b.unchanged / tot * 100) + '%', background: 'var(--dim)' })}"></i><i data-css="${css({ width: (b.declines / tot * 100) + '%', background: 'var(--down)' })}"></i></div></div>
-      ${head('Top gainers', 'Nifty 50')}<div class="card"><div class="list">${mv(pick.gainers, 1) || empty('·', '—')}</div></div>${head('Top losers', 'Nifty 50')}<div class="card"><div class="list">${mv(pick.losers, 0) || empty('·', '—')}</div></div>
-      ${m.errors && m.errors.sensex ? `<p class="note">Sensex unavailable: BSE's free feed blocks the box.</p>` : ''}`;
+  /* ── books ── */
+  V.desks = () => {
+    const B = books(); const b = B.find(x => x.k === sub.desks) || B[0];
+    const segs = segHtml('desks', [['eq', 'Equity'], ['opt', 'Options'], ['meme', 'Meme · SOL']]);
+    if (!b) return segs + empty('This book is not reporting');
+    const d = b.d, s = stats(d), meme = b.k === 'meme'; const M = meme ? (v) => !ok(v) ? '—' : (v < 0 ? '−' : '') + '◎' + Math.abs(v).toFixed(3) : (v) => inrS(v);
+    const pos = (d.positions || []).map(p => ({ p, b }));
+    const kp = (l, v, c = '') => `<div><div class="lbl">${l}</div><div class="v ${c}">${v}</div></div>`;
+    const hold = ok(s.hold) ? (s.hold >= 3600 ? (s.hold / 3600).toFixed(1) + 'h' : Math.round(s.hold / 60) + 'm') : '—';
+    const ex = Object.entries(d.exits || {}).sort((a, c) => Math.abs(c[1].pnl) - Math.abs(a[1].pnl)); const mx = Math.max(1, ...ex.map(e => Math.abs(e[1].pnl)));
+    const pu = d.per_underlying || []; const mu = Math.max(1, ...pu.map(u => Math.abs(u.pnl)));
+    const hb = Object.entries(d.heartbeat || {});
+    return `${segs}<div class="cols c3"><div>
+      <section class="p hero">
+        <div class="row1"><div><div class="lbl">${esc(b.name)} · ${esc(d.mode || 'paper')}</div><div class="big">${meme ? M(d.equity) : inr(d.equity)}</div></div>${tag(d.running ? 'Running' : 'Idle', d.running ? 'u' : '')}</div>
+        <div class="sub"><span>Today <b class="${cls(d.today)}">${meme ? M(d.today) : sInr(d.today)}</b></span><span>Total <b class="${cls(d.pnl)}">${meme ? M(d.pnl) : sInr(d.pnl)} · ${pct(d.pnl_pct)}</b></span>${meme ? `<span>≈ <b>${inrS(b.eq)}</b></span>` : `<span>Cash <b>${inrS(d.cash)}</b></span>`}</div>
+        <div class="row1" data-css="margin-top:14px;align-items:center"><span class="lbl">Equity curve</span>${segHtml('curve', [['intraday', 'Session'], ['all', 'All']], true)}</div>
+        <div class="chartw" data-css="margin-top:0"><canvas id="dc"></canvas><div class="scrub" id="dcs"></div></div>
+      </section>
+      <div class="p"><div class="kpis">
+        ${kp('Trades', nf(s.n))}${kp('Win rate', ok(s.wr) ? s.wr.toFixed(1) + '%' : '—')}${kp('Profit factor', ok(s.pf) ? s.pf.toFixed(2) : '—', s.pf >= 1 ? 'up' : 'dn')}
+        ${kp('Expectancy', M(s.exp), cls(s.exp))}${kp('Sharpe*', ok(s.sharpe) ? s.sharpe.toFixed(2) : '—', cls(s.sharpe))}${kp('Sortino*', ok(s.sortino) ? s.sortino.toFixed(2) : '—', cls(s.sortino))}
+        ${kp('Max DD', pct(s.mdd, 2), 'dn')}${kp('Current DD', pct(s.curdd, 2), s.curdd < -0.01 ? 'dn' : '')}${kp('Payoff', ok(s.payoff) ? s.payoff.toFixed(2) + '×' : '—')}
+        ${kp('Avg win', M(s.avgW), 'up')}${kp('Avg loss', M(s.avgL), 'dn')}${kp('Avg hold', hold)}
+        <div class="last-row">${kp('Best', M(s.best), 'up')}</div><div class="last-row">${kp('Worst', M(s.worst), 'dn')}</div><div class="last-row">${kp('Charges', M(s.charges))}</div>
+      </div><div class="note">*Annualised from ${s.ndays} daily returns; indicative until there is more history.</div></div>
+      ${head('Positions', pos.length + ' open')}
+      ${P(T(POSCOLS, posRows(pos), 'Flat. No open positions.'))}
+      ${head('Recent trades', Math.min(30, (d.trades || []).length) + ' shown')}
+      ${P(T([['Time', 'l'], ['Symbol', 'l'], 'Side', 'Qty', 'Entry', 'Exit', 'P&L', ['Exit', 'l']], (d.trades || []).slice(0, 30).map(t => `<tr><td class="l tx2">${ist(t.exit_ts || t.entry_ts, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}</td><td class="n">${esc(t.option_type ? `${t.underlying} ${nf(t.strike)} ${t.option_type}` : t.symbol)}</td><td class="${t.side === 'SHORT' ? 'dn' : 'up'}">${esc((t.side || '').slice(0, 1))}</td><td>${nf(t.qty, t.qty < 10 ? 2 : 0)}</td><td>${px(t.entry)}</td><td>${px(t.exit ?? t.last)}</td><td class="${cls(t.pnl)}">${M(t.pnl)}</td><td class="l mu">${esc((t.exit_kind || t.status || '').replace(/_/g, ' ').toLowerCase())}</td></tr>`), 'No trades yet'))}
+    </div><div>
+      ${head('Exits by reason')}
+      ${P(T([['Reason', 'l'], 'Trades', 'P&L', ''], ex.map(([k, v]) => `<tr><td class="n">${esc(k.replace(/_/g, ' ').toLowerCase())}</td><td>${nf(v.n)}</td><td class="${cls(v.pnl)}">${M(v.pnl)}</td><td>${bar(Math.abs(v.pnl) / mx, v.pnl >= 0 ? 'u' : 'd')}</td></tr>`), 'No exits yet'))}
+      ${head('P&L by underlying', pu.length + ' names')}
+      ${P(T([['Name', 'l'], 'Trades', 'P&L', ''], pu.slice(0, 15).map(u => `<tr><td class="n">${esc(u.u)}</td><td>${nf(u.n)}</td><td class="${cls(u.pnl)}">${M(u.pnl)}</td><td>${bar(Math.abs(u.pnl) / mu, u.pnl >= 0 ? 'u' : 'd')}</td></tr>`), 'No trades yet'))}
+      ${head('Rules')}
+      ${P(T([['Parameter', 'l'], 'Value'], Object.entries(d.config || {}).map(([k, v]) => `<tr><td class="n">${esc(k)}</td><td>${esc(v)}</td></tr>`)))}
+      ${hb.length ? head('Agents', hb.length) + P(T([['Agent', 'l'], 'Status', 'Seen'], hb.map(([k, v]) => `<tr><td class="n">${esc(k)}</td><td class="mu">${esc(v.status || '—')}</td><td class="mu">${ago(v.ts)}</td></tr>`))) : ''}
+    </div></div>`;
   };
-  P.fno = () => {
-    const f = D.fno || {}, c = f.chain || {}; const rows = c.rows || [];
-    if (!rows.length) return `<div class="card">${empty('∅', 'Option chain not available yet')}</div>`;
-    const mx = Math.max(1, ...rows.map(r => Math.max(r.ce_oi || 0, r.pe_oi || 0)));
-    const near = rows.filter(r => Math.abs(r.strike - c.atm) <= 1000);
-    return `<div class="chips-x">${(f.expiries || []).slice(0, 6).map(e => `<span class="chip ${e === f.preferred_expiry ? 'up' : ''}">${esc(e)}</span>`).join('')}</div>
-      <div class="grid g3" data-css="${css({ 'margin-top': '10px' })}">
-        <div class="card acc-eq"><div class="lbl">Spot</div><div class="mid num">${nf(c.spot, 0)}</div></div>
-        <div class="card acc-gold"><div class="lbl">Max pain</div><div class="mid num" data-css="color:var(--amber)">${nf(c.max_pain)}</div></div>
-        <div class="card acc-opt"><div class="lbl">PCR · OI</div><div class="mid num ${(c.pcr_oi || 0) >= 1 ? 'up' : 'down'}">${(c.pcr_oi || 0).toFixed(2)}</div></div>
-      </div>
-      ${head('Open interest', esc(f.symbol || 'NIFTY') + ' · ' + esc(c.expiry || ''))}
-      <div class="card acc-aur"><div class="oi-head"><span>CALLS</span><span>STRIKE</span><span>PUTS</span></div>
-      <div class="oi">${near.map((r, i) => `<i class="ce" data-css="${css({ width: ((r.ce_oi || 0) / mx * 100).toFixed(1) + '%', 'animation-delay': i * 15 + 'ms' })}"></i><span class="k ${r.strike === c.atm ? 'atm' : r.strike === c.max_pain ? 'mp' : ''}">${nf(r.strike)}</span><i class="pe" data-css="${css({ width: ((r.pe_oi || 0) / mx * 100).toFixed(1) + '%', 'animation-delay': i * 15 + 'ms' })}"></i>`).join('')}</div>
-      <p class="note" data-css="margin:12px 0 0">Blue = ATM · amber = max pain. ${esc(f.note || '')}</p></div>
-      <div class="grid g2">
-        <div><div class="h"><h2>Call wall</h2></div><div class="card"><div class="list">${(c.top_ce_oi || []).map(x => `<div class="li"><div class="t"><b>${nf(x.strike)} CE</b><span>chg ${nf(x.oi_chg)}</span></div><div class="v">${nf(x.oi)}</div></div>`).join('')}</div></div></div>
-        <div><div class="h"><h2>Put wall</h2></div><div class="card"><div class="list">${(c.top_pe_oi || []).map(x => `<div class="li"><div class="t"><b>${nf(x.strike)} PE</b><span>chg ${nf(x.oi_chg)}</span></div><div class="v">${nf(x.oi)}</div></div>`).join('')}</div></div></div>
-      </div>`;
+  V.desks.after = (root) => { const b = books().find(x => x.k === sub.desks); if (!b) return; const meme = b.k === 'meme'; let pts = sub.curve === 'intraday' ? b.d.intraday : b.d.curve; if (!pts || pts.length < 2) pts = b.d.curve;
+    chart($('#dc', root), pts, { base: sub.curve === 'all' ? b.d.start : (pts && pts[0] ? pts[0][1] : null), fmt: meme ? (v) => '◎' + v.toFixed(3) : (v) => inr(v), axis: meme ? (v) => v.toFixed(2) : (v) => inrS(v), scrub: $('#dcs', root), times: sub.curve === 'intraday' ? { hour: '2-digit', minute: '2-digit', hour12: false } : { day: '2-digit', month: 'short' } }); };
+
+  /* ── markets ── */
+  const P_ = {};
+  V.pulse = () => segHtml('pulse', [['overview', 'Overview'], ['fno', 'F&O'], ['flows', 'Flows'], ['breakouts', 'Breakouts'], ['crypto', 'Crypto'], ['news', 'News']]) + (P_[sub.pulse] || P_.overview)();
+  P_.overview = () => {
+    const M = D.markets || {}, w = W(); const ses = M.session || {}; const rc = M.recap || {};
+    const ind = (w && w.quotes.india || []).filter(q => q.p != null);
+    const rows = ind.map(q => `<tr><td class="n">${esc(q.n)}${q.d ? `<small>delayed ${q.d}m</small>` : ''}</td><td>${nf(q.p, 2)}</td><td class="${cls(q.cp)}">${pct(q.cp)}</td><td>${rng(q.l, q.h, q.p)}</td><td>${rng(q.l52, q.h52, q.p)}</td><td>${spark(q.sp)}</td></tr>`);
+    if (!rows.length) Object.values(M.indices || {}).forEach(x => rows.push(`<tr><td class="n">${esc(x.name)}</td><td>${nf(x.ltp, 2)}</td><td class="${cls(x.change_pct)}">${pct(x.change_pct)}</td><td>${rng(x.low, x.high, x.ltp)}</td><td>${rng(x.year_low, x.year_high, x.ltp)}</td><td></td></tr>`));
+    const br = M.breadth || {}; const tot = (br.advances || 0) + (br.declines || 0) + (br.unchanged || 0) || 1;
+    const sect = (w && w.quotes.sectors || []).filter(q => q.cp != null).sort((a, b) => b.cp - a.cp); const ms = Math.max(1, ...sect.map(s => Math.abs(s.cp)));
+    const lists = (M.movers || {}).lists || {}; const L = lists[sub.mov] || {};
+    const mv = (arr) => T([['Symbol', 'l'], 'LTP', 'Chg', 'Vol'], (arr || []).slice(0, 8).map(x => `<tr><td class="n">${esc(x.symbol)}</td><td>${nf(x.ltp, 2)}</td><td class="${cls(x.change_pct)}">${pct(x.change_pct)}</td><td class="mu">${esc(x.volume || '—')}</td></tr>`), 'No data');
+    const nq = quote('^NSEI');
+    return `<div class="cols c3"><div>
+      ${P(`<div class="pp"><div class="row1"><div><div class="lbl">Session</div><div data-css="margin-top:7px;font-size:14px;line-height:1.35">${esc(rc.headline || '—')}</div><div class="note bare" data-css="margin-top:4px">${esc(rc.summary || '')}</div></div>${tag(ses.open ? 'Open' : 'Closed', ses.open ? 'u' : '')}</div></div>`)}
+      ${head('Indices', w && w.nse_msg ? esc(w.nse_msg) : '')}
+      ${P(T([['Index', 'l'], 'Last', 'Chg', 'Day', '52W', ''], rows))}
+      ${head('Breadth', esc(br.timestamp || ''))}
+      ${P(`<div class="pp"><div class="legend"><span class="up">${nf(br.advances)} adv</span><span>${nf(br.unchanged)} unch</span><span class="dn">${nf(br.declines)} dec</span></div>
+        <div class="breadth"><i class="a" data-css="${css({ width: (br.advances || 0) / tot * 100 + '%' })}"></i><i class="n" data-css="${css({ width: (br.unchanged || 0) / tot * 100 + '%' })}"></i><i class="d" data-css="${css({ width: (br.declines || 0) / tot * 100 + '%' })}"></i></div>
+        <div class="legend"><span>A/D ${br.declines ? (br.advances / br.declines).toFixed(2) : '—'}</span>${nq && nq.adv != null ? `<span>Nifty 50 <b class="up">${nq.adv}</b>/<b class="dn">${nq.dec}</b></span>` : ''}${nq && nq.pe ? `<span>P/E ${nq.pe}</span>` : ''}</div></div>`)}
+      ${head('Sector heat', 'Nifty sectoral indices')}
+      ${P(sect.length ? `<div class="heat">${sect.map(s => `<div data-css="${css({ background: `rgba(${s.cp >= 0 ? '95,185,142' : '217,112,107'},${(0.03 + 0.2 * Math.min(1, Math.abs(s.cp) / ms)).toFixed(3)})` })}"><b>${esc(s.n)}</b><span class="${cls(s.cp)}">${pct(s.cp)}</span></div>`).join('')}</div>` : empty('World Monitor offline'))}
+    </div><div>
+      ${head('Movers', esc((M.movers || {}).timestamp || ''))}
+      ${segHtml('mov', [['NIFTY', 'Nifty'], ['BANKNIFTY', 'Bank'], ['FOSec', 'F&O'], ['allSec', 'All']], true)}
+      ${P(`<div class="lbl" data-css="padding:11px 14px 2px">Gainers</div>${mv(L.gainers)}`)}
+      ${P(`<div class="lbl" data-css="padding:11px 14px 2px">Losers</div>${mv(L.losers)}`)}
+      ${head('Global cues', '<a data-jump="world:global">all →</a>')}
+      ${P(T([['Market', 'l'], 'Last', 'Chg', ''], [['ES=F', 'S&P 500 fut'], ['NQ=F', 'Nasdaq fut'], ['^N225', 'Nikkei'], ['^HSI', 'Hang Seng'], ['^GDAXI', 'DAX'], ['DX-Y.NYB', 'DXY'], ['^TNX', 'US 10Y'], ['BZ=F', 'Brent'], ['GC=F', 'Gold']].map(([s, n]) => { const q = quote(s); return q ? `<tr><td class="n">${n}</td><td>${px(q.p)}</td><td class="${cls(q.cp)}">${pct(q.cp)}</td><td>${spark(q.sp)}</td></tr>` : ''; }).filter(Boolean), 'World Monitor offline'))}
+      ${src((M.sources || []).join(' · '))}
+    </div></div>`;
   };
-  P.breakouts = () => {
-    const b = D.breakouts || {}; const L = b.breakouts || [], N = b.near || []; const mx = Math.max(1, ...L.map(x => x.volume_multiple || 0));
-    return `<div class="card acc-meme"><div class="lbl">Rule</div><div class="note" data-css="margin-top:4px">${esc(b.rule || '')}</div><div class="row" data-css="margin-top:10px"><span class="chip up">${L.length} breakouts</span><span class="chip">${N.length} near</span><span class="sp"></span><small class="muted num">session ${esc(b.session_date || '')}</small></div></div>
-      ${head('Breakouts', 'volume × 20-day avg')}
-      <div class="card acc-meme"><div class="list">${L.map(x => `<div class="lb"><span class="rk">↗</span><div><b>${esc(x.symbol)}</b> <small class="muted num">₹${nf(x.close, 2)} · ${pct(x.pct_from_level, 1)} over ${nf(x.level, 1)}</small><div class="bar"><i data-css="${css({ width: (x.volume_multiple / mx * 100).toFixed(1) + '%' })}"></i></div></div><span class="vol up">${(x.volume_multiple || 0).toFixed(1)}×</span></div>`).join('') || empty('∅', 'No breakouts this session')}</div></div>
-      ${head('Knocking', 'within 1% of the high')}
-      <div class="card"><div class="list">${N.slice(0, 15).map(x => `<div class="li"><div class="t"><b>${esc(x.symbol)}</b><span>level ${nf(x.level, 1)} · vol ${(x.volume_multiple || 0).toFixed(2)}×</span></div><div class="v">₹${nf(x.close, 2)}<small class="flat">${pct(x.pct_from_level, 2)}</small></div></div>`).join('') || empty('∅', 'None')}</div></div>`;
+  const BUILD = { 'Long build-up': 'u', 'Short build-up': 'd', 'Short covering': 'a', 'Long unwinding': '' };
+  P_.fno = () => {
+    const O = D.oi || {}; const sym = sub.fno; const s = (O.summary || {})[sym] || {}; const ch = (D.fno || {}).chain || {};
+    const t = s.totals || {}; const kp = (l, v, c = '') => `<div><div class="lbl">${l}</div><div class="v ${c}">${v}</div></div>`;
+    const ivt = (O.iv_term || []).filter(x => x.atm_iv); const vix = (D.markets && D.markets.indices || {}).VIX; const vt = D.vix_term || [];
+    const bu = (O.buildup || {})[sym] || [];
+    let chain = ''; if (sym === 'NIFTY' && (ch.rows || []).length) { const atm = ch.atm; const rows = ch.rows.filter(r => Math.abs(r.strike - atm) <= 500); const mo = Math.max(1, ...rows.map(r => Math.max(r.ce_oi || 0, r.pe_oi || 0)));
+      chain = head('Option chain', `NIFTY ${esc(ch.expiry || '')} · ATM ${nf(atm)}`) + P(T(['CE OI', 'ΔOI', 'LTP', ['Strike', ''], 'LTP', 'ΔOI', 'PE OI'], rows.map(r => `<tr class="${r.strike === atm ? 'hl' : ''}"><td>${bar((r.ce_oi || 0) / mo, 'd r')}</td><td class="${cls(r.ce_oi_chg)}">${sg(r.ce_oi_chg / 1000, 1)}k</td><td>${nf(r.ce_ltp, 2)}</td><td class="n${r.strike === ch.max_pain ? ' gold' : ''}" data-css="text-align:center">${nf(r.strike)}</td><td>${nf(r.pe_ltp, 2)}</td><td class="${cls(r.pe_oi_chg)}">${sg(r.pe_oi_chg / 1000, 1)}k</td><td>${bar((r.pe_oi || 0) / mo, 'u')}</td></tr>`))) + src('Max-pain strike in gold · ATM row marked · bars scaled to the largest OI in view'); }
+    return `${segHtml('fno', [['NIFTY', 'Nifty'], ['BANKNIFTY', 'Bank Nifty'], ['FINNIFTY', 'Fin Nifty']], true)}<div class="cols c3"><div>
+      ${P(`<div class="kpis">${kp('Spot', nf(s.u, 2))}${kp('ATM', nf(s.atm))}${kp('Max pain', nf(s.maxPain), 'gold')}${kp('PCR OI', ok(s.pcr) ? s.pcr.toFixed(2) : '—', s.pcr >= 1 ? 'up' : 'dn')}${kp('PCR ΔOI', ok(s.pcrChg) ? s.pcrChg.toFixed(2) : '—')}${kp('Straddle', nf(s.straddle, 1))}
+        <div class="last-row">${kp('ATM IV', ok(s.atmIv) ? s.atmIv.toFixed(2) + '%' : '—')}</div><div class="last-row">${kp('CE OI', nf((t.ceOI || 0) / 1e5, 1) + 'L')}</div><div class="last-row">${kp('PE OI', nf((t.peOI || 0) / 1e5, 1) + 'L')}</div></div>`)}
+      ${src(`${sym} · expiry ${s.expiry || '—'} · NSE ${s.ts || ''}`)}
+      ${head('OI build-up', 'largest ΔOI · CE + PE')}
+      ${P(T(['Strike', 'Side', 'ΔOI', 'OI', 'LTP', 'Chg', 'IV', ['Signal', 'l']], bu.map(r => `<tr><td class="n">${nf(r.k)}</td><td class="${r.side === 'CE' ? 'dn' : 'up'}">${r.side}</td><td class="${cls(r.coi)}">${sg(r.coi / 1000, 1)}k</td><td>${nf(r.oi / 1000, 0)}k</td><td>${nf(r.ltp, 2)}</td><td class="${cls(r.chg)}">${sg(r.chg, 1)}</td><td class="mu">${r.iv ? r.iv.toFixed(1) : '—'}</td><td class="l">${tag(r.kind, BUILD[r.kind])}</td></tr>`), 'Chain unavailable'))}
+      ${chain}
+    </div><div>
+      ${head('Volatility term')}
+      ${P(T([['Tenor', 'l'], 'IV', 'Straddle', 'PCR'], (vix ? [`<tr><td class="n">India VIX<small>30-day implied</small></td><td>${nf(vix.ltp, 2)}</td><td class="${cls(vix.change_pct)}">${pct(vix.change_pct)}</td><td></td></tr>`] : []).concat(ivt.map(x => `<tr><td class="n">Nifty ATM<small>${esc(x.expiry)}</small></td><td>${x.atm_iv.toFixed(2)}%</td><td>${nf(x.straddle, 1)}</td><td>${ok(x.pcr) ? x.pcr.toFixed(2) : '—'}</td></tr>`)), 'No IV data'))}
+      ${P(T([['CBOE VIX term', 'l'], 'Level', 'Prev', 'Chg'], vt.filter(x => x.v).map(x => `<tr><td class="n">${esc(x.t)}</td><td>${nu(x.v)}</td><td class="mu">${nu(x.pc)}</td><td class="${cls(x.v - x.pc)}">${pct((x.v - x.pc) / x.pc * 100, 1)}</td></tr>`), 'No data') + (vt.length > 1 && vt[0].v && vt[vt.length - 1].v ? `<div class="note">${vt[0].v > vt[vt.length - 1].v ? 'Backwardation: near-term fear above long-dated, a stress signal.' : 'Contango: the normal, calm term structure.'}</div>` : ''))}
+      ${head('Walls', 'highest open interest')}
+      ${P(T([['Resistance · CE', 'l'], 'OI', 'ΔOI'], (s.res || []).map(r => `<tr><td class="n dn">${nf(r.k)}</td><td>${nf(r.oi / 1000, 0)}k</td><td class="${cls(r.coi)}">${sg(r.coi / 1000, 1)}k</td></tr>`)) + T([['Support · PE', 'l'], 'OI', 'ΔOI'], (s.sup || []).map(r => `<tr><td class="n up">${nf(r.k)}</td><td>${nf(r.oi / 1000, 0)}k</td><td class="${cls(r.coi)}">${sg(r.coi / 1000, 1)}k</td></tr>`)))}
+      ${src('NSE option chain via World Monitor · CBOE VIX term via Yahoo')}
+    </div></div>`;
   };
-  P.crypto = () => {
-    const c = D.crypto || {}; const p = c.prices || {};
-    const coins = ['BTC', 'ETH', 'SOL'].map(s => { const x = Live.px[s] || p[s] || {}; return `<div class="card coin ${({ BTC: 'acc-gold', ETH: 'acc-eq', SOL: 'acc-meme' })[s]}" id="coin-${s}"><span class="cs">${s}</span><div class="cm"><div class="mid num grad" data-f="px">$${nf(x.price, s === 'BTC' ? 0 : 2)}</div><div class="num muted" data-f="inr">${inrS((x.price || 0) * fx())}</div></div><span class="chip num ${cls(x.change_pct)}" data-f="chg">${pct(x.change_pct)}</span></div>`; }).join('');
-    const prints = (c.large_prints || []).slice(0, 10).map(t => `<div class="li"><span class="side ${t.side === 'sell' ? 'S' : 'L'}">${t.side === 'sell' ? 'SELL' : 'BUY'}</span><div class="t"><b>${nf(t.qty, 2)} ${esc(t.asset)}</b><span>@ $${nf(t.price, 2)} · ${ago(t.ts / (t.ts > 1e12 ? 1000 : 1))} ago</span></div><div class="v">${usd(t.usd)}</div></div>`).join('');
-    const tx = (c.transfers || []).slice(0, 10).map(t => `<div class="li"><span class="side">⛓</span><div class="t"><b>${nf(t.qty, 2)} ${esc(t.asset)}</b><span>${esc(t.chain)} · ${esc((t.txid || '').slice(0, 10))}…</span></div><div class="v">${usd(t.usd)}</div></div>`).join('');
-    const hl = (c.hl_watch && c.hl_watch.wallets) || [];
-    return `<div class="grid coins">${coins}</div><p class="note">Prices stream live from Binance's public feed in your browser · INR at ${fx().toFixed(2)}</p>
-      ${head('Whale prints', 'Binance, largest recent')}<div class="card"><div class="list">${prints || empty('∅', 'No large prints right now')}</div></div>
-      ${head('On-chain', 'big transfers')}<div class="card"><div class="list">${tx || empty('∅', 'Quiet on-chain')}</div></div>
-      ${hl.length ? head('Hyperliquid watch', hl.length + ' wallets') + `<div class="card"><div class="list">${hl.slice(0, 8).map(w => `<div class="li"><div class="t"><b>${esc(w.label || w.name || (w.address || '').slice(0, 10) + '…')}</b><span>${esc(w.note || w.coin || '')}</span></div><div class="v">${w.value != null ? usd(w.value) : ''}</div></div>`).join('')}</div></div>` : ''}`;
+  P_.flows = () => {
+    const F = D.fiidii || {}; const days = F.days || []; const mx = Math.max(1, ...days.flatMap(d => [Math.abs((d.FII || {}).net || 0), Math.abs((d.DII || {}).net || 0)]));
+    const l = days[0] || {}; const fn = (l.FII || {}).net, dn = (l.DII || {}).net;
+    return `${P(`<div class="kpis k4"><div><div class="lbl">FII net</div><div class="v ${cls(fn)}">${sg(fn, 0)} <small>cr</small></div></div><div><div class="lbl">DII net</div><div class="v ${cls(dn)}">${sg(dn, 0)} <small>cr</small></div></div>
+        <div class="last-row"><div class="lbl">Combined</div><div class="v ${cls((fn || 0) + (dn || 0))}">${sg((fn || 0) + (dn || 0), 0)} <small>cr</small></div></div><div class="last-row"><div class="lbl">Session</div><div class="v">${esc(l.d || '—')}</div></div></div>`)}
+      ${head('FII / DII cash', days.length + ' sessions')}
+      ${P(T([['Date', 'l'], 'FII buy', 'FII sell', 'FII net', '', 'DII net', ''], days.map(d => { const f = d.FII || {}, i = d.DII || {}; return `<tr><td class="l tx2">${esc(d.d)}</td><td class="mu">${nf(f.buy, 0)}</td><td class="mu">${nf(f.sell, 0)}</td><td class="${cls(f.net)}">${sg(f.net, 0)}</td><td>${bar(Math.abs(f.net || 0) / mx, f.net >= 0 ? 'u' : 'd')}</td><td class="${cls(i.net)}">${sg(i.net, 0)}</td><td>${bar(Math.abs(i.net || 0) / mx, i.net >= 0 ? 'u' : 'd')}</td></tr>`; }), 'NSE flows unavailable'))}
+      ${src((F.src || 'NSE') + ' · NSE publishes one session at a time; history builds on the box daily')}`;
   };
-  function paintCoins() { ['BTC', 'ETH', 'SOL'].forEach(s => { const el = $('#coin-' + s); const x = Live.px[s]; if (!el || !x) return;
-    $('[data-f=px]', el).textContent = '$' + nf(x.price, s === 'BTC' ? 0 : 2); const ch = $('[data-f=chg]', el); ch.textContent = pct(x.change_pct); ch.className = 'chip num ' + cls(x.change_pct);
-    $('[data-f=inr]', el).textContent = inrS(x.price * fx());
-    if (x.dir) { el.classList.remove('tick-up', 'tick-down'); void el.offsetWidth; el.classList.add(x.dir > 0 ? 'tick-up' : 'tick-down'); } }); }
-  P.news = () => {
-    const n = D.news || {}; const cats = ['all', 'flagged', ...new Set((n.items || []).map(i => i.cat).filter(Boolean))];
-    const items = sub.news === 'flagged' ? (n.flagged || []) : (n.items || []).filter(i => sub.news === 'all' || i.cat === sub.news);
-    return `<div class="chips-x">${cats.map(c => `<button class="chip ${c === sub.news ? 'on' : ''}" data-news="${esc(c)}">${esc(c)}</button>`).join('')}</div>
-      <div class="card" data-css="margin-top:10px"><div class="list">${items.slice(0, 60).map(i => ext(i.link, `<div class="t"><b data-css="white-space:normal">${esc(i.title)}</b><span>${esc(i.source)} · ${ago(i.ts)} ago${(i.flags || []).length ? ' · ⚑ ' + esc(i.flags.join(', ')) : ''}</span></div>`, 'li tap' + ((i.flags || []).length ? ' news-flag' : ''))).join('') || empty('∅', 'Nothing here')}</div></div>`;
+  P_.breakouts = () => {
+    const B = D.breakouts || {};
+    return `<div class="cols"><div>${head('Breakouts', (B.breakouts || []).length + ' · ' + esc(B.session_date || ''))}
+      ${P(T([['Symbol', 'l'], 'Close', 'Level', 'Above', 'Vol ×'], (B.breakouts || []).map(b => `<tr><td class="n">${esc(b.symbol)}</td><td>${nf(b.close, 2)}</td><td class="mu">${nf(b.level, 2)}</td><td class="up">${pct(b.pct_from_level, 1)}</td><td class="${b.volume_multiple >= 3 ? 'gold' : ''}">${ok(b.volume_multiple) ? b.volume_multiple.toFixed(1) + '×' : '—'}</td></tr>`), 'No breakouts this session'))}
+    </div><div>${head('Near breakout', (B.near || []).length + ' within 1%')}
+      ${P(T([['Symbol', 'l'], 'Close', 'Level', 'Gap', 'Vol ×'], (B.near || []).slice(0, 40).map(b => `<tr><td class="n">${esc(b.symbol)}</td><td>${nf(b.close, 2)}</td><td class="mu">${nf(b.level, 2)}</td><td class="${cls(b.pct_from_level)}">${pct(b.pct_from_level, 2)}</td><td>${ok(b.volume_multiple) ? b.volume_multiple.toFixed(1) + '×' : '—'}</td></tr>`), 'None'))}
+      ${src((B.rule || '') + ' · ' + (B.src || ''))}</div></div>`;
   };
+  P_.crypto = () => {
+    const C = D.crypto || {}; const coins = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];
+    const spot = coins.map(c => { const x = Live.px[c] || (C.prices || {})[c]; if (!x) return ''; return `<tr data-c="${c}"><td class="n">${c}</td><td class="px">${px(x.price)}</td><td class="chg ${cls(x.change_pct)}">${pct(x.change_pct)}</td><td class="mu">${px(x.high)}</td><td class="mu">${px(x.low)}</td><td class="tx2 inr">${inrS(x.price * fx())}</td></tr>`; }).filter(Boolean);
+    const live = Object.keys(Live.fut).length > 0; const dv = live ? coins.map(c => Live.fut[c]).filter(Boolean) : ((D.deriv || {}).rows || []).filter(r => !r.error);
+    const hl = (C.hl_watch || {}).wallets || [];
+    return `<div class="cols c3"><div>
+      ${head('Spot', Object.keys(Live.px).length ? '<i class="dot live"></i>Binance stream' : 'vault snapshot')}
+      ${P(T([['Coin', 'l'], 'USD', '24h', 'High', 'Low', 'INR'], spot, 'No prices'))}
+      ${head('Perpetuals', live ? 'Binance USD-M · live' : 'OKX USDT swaps · vault')}
+      ${P(T([['Coin', 'l'], 'Fund 8h', 'Annual', 'Open int.', live ? 'Basis' : 'Vol 24h', 'Next'], dv.map(r => `<tr><td class="n">${r.c}</td><td class="${cls(r.funding)}">${(r.funding * 100).toFixed(4)}%</td><td class="${cls(r.funding_ann)}">${pct(r.funding_ann, 1)}</td><td>${usd(r.oi_usd)}</td><td class="mu">${live ? pct(r.basis, 3) : usd(r.vol_ccy24 * (r.last || 0))}</td><td class="mu">${r.next ? ist(r.next) : '—'}</td></tr>`), 'Derivatives unavailable'))}
+      ${src(live ? 'fapi.binance.com, fetched by this browser' : ((D.deriv || {}).src || ''))}
+    </div><div>
+      ${head('Whale wallets', 'Hyperliquid · ' + hl.length)}
+      ${P(T([['Wallet', 'l'], 'Account', 'Day', 'Week', 'Win 7d', ['Largest', 'l']], hl.slice(0, 12).map(x => { const p = (x.positions || []).slice().sort((a, b) => b.notional - a.notional)[0]; return `<tr><td class="n">${esc(x.label || (x.address || '').slice(0, 8))}</td><td>${usd(x.account_value)}</td><td class="${cls(x.pnl_day)}">${usd(x.pnl_day)}</td><td class="${cls(x.pnl_week)}">${usd(x.pnl_week)}</td><td class="mu">${ok(x.winrate_7d) ? (x.winrate_7d * 100).toFixed(0) + '%' : '—'}</td><td class="l">${p ? `<span class="${p.side === 'SHORT' ? 'dn' : 'up'}">${esc(p.coin)} ${p.side === 'SHORT' ? 'S' : 'L'}</span> <span class="mu">${usd(p.notional)} · ${p.lev}×</span>` : '—'}</td></tr>`; }), 'No whale snapshot'))}
+      ${src((C.notes || []).join(' '))}
+    </div></div>`;
+  };
+  const newsList = (items, n = 50) => items.slice(0, n).map(i => ext(i.link, `<i class="sev s${i.sev || (i.flags && i.flags.length ? 2 : 1)}"></i><div class="t"><b>${esc(i.title)}</b><span>${esc(i.source || '')} · ${ago(i.ts)}${i.place ? ' · ' + esc(i.place) : ''}</span></div>`, 'li')).join('') || empty('No headlines');
+  P_.news = () => {
+    const N = D.news || {}; const items = N.items || []; const cats = [...new Set(items.map(i => i.cat).filter(Boolean))];
+    const f = sub.news === 'flagged' ? (N.flagged || []) : sub.news === 'all' ? items : items.filter(i => i.cat === sub.news);
+    return `${segHtml('news', [['all', 'All'], ['flagged', 'Flagged', (N.flagged || []).length || '']].concat(cats.map(c => [c, c])), true)}${P(newsList(f, 60))}${src('Desk news feeds · ' + ago(N.ts) + ' ago')}`;
+  };
+
+  /* ── world (merged from the World Monitor / WWAi command center) ── */
+  const W_ = {};
+  V.world = () => {
+    const w = W(); const segs = segHtml('world', [['intel', 'Brief'], ['monitor', 'Monitor'], ['feed', 'Events'], ['global', 'Global'], ['calendar', 'Calendar'], ['wnews', 'News']]);
+    if (!w) return segs + P(empty('World Monitor is offline on the box (live-markets :8620). start.sh restarts it.'));
+    return segs + (W_[sub.world] || W_.monitor)(w);
+  };
+  const LON = (lon) => (lon + 180) / 360 * 1000, LAT = (lat) => (90 - lat) / 180 * 500;
+  function mapSvg(w) {
+    const grid = []; for (let x = -150; x <= 180; x += 30) grid.push(`<line x1="${LON(x)}" y1="40" x2="${LON(x)}" y2="412"/>`); for (let y = -60; y <= 75; y += 30) grid.push(`<line x1="0" y1="${LAT(y)}" x2="1000" y2="${LAT(y)}"/>`);
+    const pins = (w.pins || []).filter(p => p.ll).map(p => `<circle class="pin s${p.sev || 1}" cx="${LON(p.ll[1]).toFixed(1)}" cy="${LAT(p.ll[0]).toFixed(1)}" r="1.8" opacity=".75"/>`);
+    const hot = (w.hot || []).filter(h => h.ll).sort((a, b) => b.n - a.n);
+    const hs = hot.slice(0, 14).map((h, i) => { const x = LON(h.ll[1]), y = LAT(h.ll[0]), r = 2.5 + Math.sqrt(h.n) * 1.6;
+      return `<circle class="halo s${h.sev || 1}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" opacity=".7"/>${i < 5 && h.sev >= 3 ? `<circle class="halo s3 pulse" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}"/>` : ''}${i < 6 ? `<text x="${(x + r + 3).toFixed(1)}" y="${(y + 3).toFixed(1)}">${esc(String(h.place || '').toUpperCase())}</text>` : ''}`; });
+    const cps = (w.chokepoints || []).filter(c => c.ll).map(c => { const x = LON(c.ll[1]), y = LAT(c.ll[0]); return `<rect class="cp ${c.level !== 'NORMAL' ? 'hi' : ''}" x="${(x - 3).toFixed(1)}" y="${(y - 3).toFixed(1)}" width="6" height="6" transform="rotate(45 ${x.toFixed(1)} ${y.toFixed(1)})"/>`; });
+    return `<div class="map"><svg viewBox="0 40 1000 372" role="img" aria-label="World situation map"><g class="grid">${grid.join('')}</g><path class="land" d="${window.VANTA_LAND || ''}"/>${pins.join('')}${hs.join('')}${cps.join('')}</svg>
+      <div class="mlegend"><span><i class="lg-h"></i>high</span><span><i class="lg-e"></i>elevated</span><span><i class="lg-w"></i>watch</span><span><i class="lg-c"></i>chokepoint</span></div></div>`;
+  }
+  W_.monitor = (w) => {
+    const r = w.risk || {}; const lvl = r.level || 5; const filled = 6 - lvl;
+    const imp = [['BZ=F', 'Brent'], ['CL=F', 'WTI'], ['GC=F', 'Gold'], ['SI=F', 'Silver'], ['NG=F', 'Nat gas'], ['DX-Y.NYB', 'DXY'], ['^TNX', 'US 10Y'], ['^VIX', 'CBOE VIX'], ['^INDIAVIX', 'India VIX'], ['USDINR=X', 'USD/INR'], ['ES=F', 'S&P fut']];
+    const hot = (w.hot || []).slice().sort((a, b) => b.n - a.n).slice(0, 12);
+    return `<div class="cols c3"><div>
+      ${P(`<div class="pp"><div class="risk"><div><div class="lbl">Global risk</div><div class="rl">Level ${lvl}<span class="mu"> / 5</span></div></div>
+        <div class="rr"><div class="lvl">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= filled ? 'on' + (lvl <= 2 ? ' hot' : '') : ''}"></i>`).join('')}</div><div class="note bare">score ${r.score ?? '—'}/100 · ${r.high6h ?? 0} severe headlines · 6h</div></div></div></div>
+        ${mapSvg(w)}<div class="note">Level 1 is extreme, 5 is calm: a plain heuristic from headline severity, VIX, India VIX and crude/gold moves. Dots are geo-tagged headlines; rings are hotspots sized by headline count.</div>`)}
+      ${head('Chokepoints', '24h headline scan')}
+      ${P(T([['Route', 'l'], ['Carries', 'l'], 'Hits', 'Status'], (w.chokepoints || []).map(c => `<tr class="${c.level !== 'NORMAL' ? 'hl' : ''}"><td class="n">${esc(c.name)}</td><td class="l mu">${esc(c.share || '')}</td><td>${c.hits}</td><td>${tag(c.level.toLowerCase(), c.level === 'HIGH' ? 'd' : c.level === 'ELEVATED' ? 'a' : '')}</td></tr>`)))}
+    </div><div>
+      ${head('Market impact', 'risk-sensitive assets')}
+      ${P(T([['Asset', 'l'], 'Last', 'Chg', ''], imp.map(([s, n]) => { const q = quote(s); return q ? `<tr><td class="n">${n}</td><td>${px(q.p)}</td><td class="${cls(q.cp)}">${pct(q.cp)}</td><td>${spark(q.sp)}</td></tr>` : ''; }).filter(Boolean)))}
+      ${head('Hotspots', hot.length + ' places')}
+      ${P(T([['Place', 'l'], 'Headlines', 'Severity'], hot.map(h => `<tr><td class="n">${esc(h.place)}</td><td>${h.n}</td><td>${tag(h.sev >= 3 ? 'high' : h.sev === 2 ? 'elevated' : 'watch', h.sev >= 3 ? 'd' : h.sev === 2 ? 'a' : '')}</td></tr>`)))}
+      ${src(w.src + ' · updated ' + ago(w.at) + ' ago')}
+    </div></div>`;
+  };
+  W_.intel = (w) => {
+    const I = D.intel || {}; const b = I.briefing || {}; const hz = I.hero_zero || {}; const wh = I.whale || []; const mw = Math.max(1, ...wh.map(r => r.long + r.short));
+    const al = (list) => list.map(a => ext(a.link, `<i class="sev s${a.sev || 1}"></i><div class="t"><b>${esc(a.title)}</b><span>${esc(a.cat ? a.cat + ' · ' + (a.source || '') + ' · ' + ago(a.ts) : a.detail || '')}</span></div>`, 'li')).join('') || empty('No rule fired');
+    return `<div class="cols c3"><div>
+      ${head('Briefing', esc(b.ist || ''))}
+      ${P(`<div class="pp brief">${(b.lines || []).map(l => `<p>${esc(l)}</p>`).join('') || empty('No briefing yet')}</div>`)}
+      ${head('Market-moving alerts', (I.alerts || []).length + ' fired')}
+      ${P(al(I.alerts || []))}
+      ${src(I.rules || '')}
+    </div><div>
+      ${head('Crypto overnight', (I.crypto_alerts || []).length + ' alerts')}
+      ${P(al(I.crypto_alerts || []))}
+      ${head('Whale brief', 'Hyperliquid consensus')}
+      ${P(T([['Coin', 'l'], 'Long', 'Short', 'Net', ''], wh.map(r => `<tr><td class="n">${esc(r.coin)}</td><td class="up">${usd(r.long)}</td><td class="dn">${usd(r.short)}</td><td class="${cls(r.net)}">${usd(r.net)}</td><td>${bar((r.long + r.short) / mw, r.net >= 0 ? 'u' : 'd')}</td></tr>`), 'No whale snapshot'))}
+      ${head('Hero-zero scan', hz.active ? 'EXPIRY DAY · ' + esc(hz.expiry) : 'next expiry ' + esc(hz.expiry || '—'))}
+      ${P(`<div class="pp"><div class="legend"><span>Bias <b class="${hz.bias === 'up' ? 'up' : hz.bias === 'down' ? 'dn' : 'gold'}">${esc(hz.bias || '—')}</b></span><span>Spot ${nf(hz.spot, 2)}</span><span>Max pain ${nf(hz.max_pain)}</span></div></div>` + T(['Strike', 'Side', 'LTP', 'Dist', 'OI', 'ΔOI'], (hz.cands || []).map(c => `<tr><td class="n">${nf(c.k)}</td><td class="${c.side === 'CE' ? 'up' : 'dn'}">${c.side}</td><td>${nf(c.ltp, 2)}</td><td class="mu">${sg(c.dist, 0)}</td><td>${nf((c.oi || 0) / 1000, 0)}k</td><td class="${cls(c.coi)}">${sg((c.coi || 0) / 1000, 1)}k</td></tr>`), hz.active ? 'No strike passes the rule' : 'Runs on expiry day only') + `<div class="note">${esc(hz.rule || '')}</div>`)}
+    </div></div>`;
+  };
+  W_.feed = (w) => {
+    const pins = (w.pins || []).slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)); const f = sub.feed === 'high' ? pins.filter(p => p.sev >= 3) : sub.feed === 'elev' ? pins.filter(p => p.sev === 2) : pins;
+    return `${segHtml('feed', [['all', 'All'], ['high', 'High', pins.filter(p => p.sev >= 3).length], ['elev', 'Elevated']], true)}${P(newsList(f, 80))}${src('Conflict & event feed: geo-tagged headlines from 18 wire/RSS feeds · World Monitor')}`;
+  };
+  W_.global = (w) => {
+    const tb = (title, g) => head(title) + P(T([['Market', 'l'], 'Last', 'Chg', 'Day', ''], (w.quotes[g] || []).filter(q => q.p != null).map(q => `<tr><td class="n">${esc(q.n)}${q.d ? `<small>${q.d}m delay</small>` : ''}</td><td>${px(q.p)}</td><td class="${cls(q.cp)}">${pct(q.cp)}</td><td>${rng(q.l, q.h, q.p)}</td><td>${spark(q.sp)}</td></tr>`), 'No quotes'));
+    return `<div class="cols"><div>${tb('Global indices', 'global')}${tb('Commodities', 'commod')}</div><div>${tb('Futures · rates · FX', 'futures')}${src('Yahoo quote API via World Monitor; delays marked per row')}</div></div>`;
+  };
+  W_.calendar = (w) => {
+    const ev = (w.calendar || []).slice().sort((a, b) => a.t - b.t); const by = {}; ev.forEach(e => { const k = ist(e.t, { weekday: 'short', day: '2-digit', month: 'short' }); (by[k] = by[k] || []).push(e); });
+    const imp = (i) => `<span class="${i >= 1 ? 'gold' : i === 0 ? 'tx2' : 'dim'}">${'●'.repeat(Math.max(1, (i || 0) + 2))}</span>`;
+    const out = Object.entries(by).map(([k, list]) => head(k, list.length + ' events') + P(T([['IST', 'l'], ['', 'l'], ['Event', 'l'], 'Imp', 'Act', 'Fcst', 'Prev'], list.map(e => `<tr class="${e.imp >= 1 ? 'hl' : ''}"><td class="l tx2">${ist(e.t)}</td><td class="l mu">${esc(e.c)}</td><td class="w">${esc(e.title)}${e.per ? ` <span class="dim">${esc(e.per)}</span>` : ''}</td><td>${imp(e.imp)}</td><td>${e.a ?? '—'}</td><td class="mu">${e.f ?? '—'}</td><td class="mu">${e.p ?? '—'}</td></tr>`)))).join('');
+    return (out || P(empty('No upcoming events'))) + src('TradingView public economic calendar (IN, US, CN, EU, JP, GB) via World Monitor');
+  };
+  W_.wnews = (w) => { const items = w.news || []; const cats = [...new Set(items.map(i => i.cat).filter(Boolean))]; const f = sub.wnews === 'all' ? items : items.filter(i => i.cat === sub.wnews);
+    return `${segHtml('wnews', [['all', 'All']].concat(cats.map(c => [c, c])), true)}${P(newsList(f, 70))}${src('Reuters/AP via Google News, BBC, Al Jazeera, France 24, DW, UN, ET, Mint, BS, CoinDesk · World Monitor')}`; };
 
   /* ── sports ── */
-  const SPORT_ORDER = ['cricket', 'soccer', 'nba', 'nfl', 'nhl', 'ncaaf', 'ncaab', 'tennis', 'mma', 'golf', 'f1', 'mlb'];
-  const sportData = (s) => Live.sports[s] || (D.sports && D.sports.sports && D.sports.sports[s]) || null;
+  const sportData = (k) => Live.sports[k] || (D && D.sports && D.sports.sports && D.sports.sports[k]) || null;
+  const wpFor = (g) => { const m = D.winprob || {}; const id = String(g.id || '').split(':').pop(); for (const k in m) if (k.split(':').pop() === id) return m[k]; return null; };
+  function game(g) {
+    const cs = g.competitors || []; const live = g.state === 'in'; const wp = wpFor(g);
+    const home = cs.find(c => c.home) || cs[0]; const sc = cs.slice(0, g.sport === 'golf' || g.sport === 'f1' ? 6 : 2);
+    const rows = sc.map(c => { const key = g.id + c.abbr; const bump = prevScore[key] != null && prevScore[key] !== c.score; prevScore[key] = c.score; const long = String(c.score || '').length > 9;
+      return `<div class="tm ${c.winner ? 'win' : ''} ${long ? 'long' : ''}"><span class="ab">${c.logo ? `<img src="${esc(c.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : esc((c.abbr || c.name || '?').slice(0, 3))}</span><span class="nm">${esc(c.name)}${c.record ? ` <span class="dim m">${esc(c.record)}</span>` : ''}</span><span class="sc ${bump ? 'bump' : ''}">${esc(c.score ?? '')}</span></div>`; }).join('');
+    const odds = g.odds && (g.odds.details || g.odds.over_under) ? `${esc(g.odds.details || '')}${g.odds.over_under ? ' · o/u ' + g.odds.over_under : ''}` : '';
+    const clk = live ? (g.clock && g.clock !== '0.0' && g.clock !== "0'" ? g.clock : '') : g.state === 'pre' ? ist(g.start, { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) + ' IST' : 'final';
+    return `<div class="g"><div class="meta"><b>${live ? '<i class="dot live"></i><span class="lvt">LIVE</span> ' : ''}${esc(g.league || '')}</b><span>${esc(clk)}</span></div>${rows}
+      ${g.detail && !/^final$/i.test(g.detail) ? `<div class="det">${esc(g.detail)}</div>` : ''}${wp && home ? `<div class="wp"><span>${esc(home.abbr || 'Home')} win</span><span class="bar"><i data-css="${css({ width: (wp.home * 100).toFixed(1) + '%' })}"></i></span><span class="tx2">${(wp.home * 100).toFixed(1)}%</span>${spark(wp.series, 'g')}</div>` : ''}${odds ? `<div class="det">${odds}</div>` : ''}</div>`;
+  }
+  const S_ = {};
   V.sports = () => {
-    const tabs = [['home', 'Most bet']].concat(SPORT_ORDER.map(s => [s, Live.LABEL[s], (sportData(s) || {}).live || 0]));
-    return segHtml('sports', tabs) + (sub.sports === 'home' ? sportsHome() : sportBoard(sub.sports));
+    const ks = Live.SPORTS.filter(k => { const d = sportData(k); return d && (d.games || []).length; });
+    const segs = segHtml('sports', [['home', 'Markets']].concat(ks.map(k => [k, Live.LABEL[k] || k, (sportData(k) || {}).live || ''])).concat([['standings', 'Standings']]));
+    if (sub.sports === 'home') return segs + S_.home();
+    if (sub.sports === 'standings') return segs + S_.standings();
+    const d = sportData(sub.sports); if (!d) return segs + P(empty('No games'));
+    const gs = d.games || [];
+    return segs + `<div class="cols">${[['in', 'Live'], ['pre', 'Upcoming'], ['post', 'Final']].map(([st, t]) => { const l = gs.filter(g => g.state === st); return l.length ? `<div>${head(t, l.length + (Live.sports[sub.sports] ? ' · ESPN live' : ' · vault ' + ago(D.sports && D.sports.ts)))}${P(l.slice(0, 25).map(game).join(''))}</div>` : ''; }).join('')}</div>`;
   };
-  V.sports.after = () => { if (sub.sports !== 'home') Live.watch(sub.sports); else Live.unwatch(); };
-  function sportsHome() {
-    const h = D.sports_home || {}; const R = (h.sports_rank || []).slice(0, 8); const mx = Math.max(1, ...R.map(r => r.volume24hr || 0));
-    const ev = (h.top_events || []).slice(0, 14);
-    const evHtml = ev.map((e, i) => { const mk = (e.markets || [])[0] || {}; const outs = (mk.outcomes || []).slice(0, 4); const fav = Math.max(...outs.map(o => o.implied_pct || 0));
-      return ext(e.url, `<div class="row"><span class="rk num" data-css="color:var(--acc)">#${i + 1}</span><span class="lbl">${esc(Live.LABEL[e.sport] || e.sport || '')}</span><span class="sp"></span>${(e.sources || [e.source || (String(e.id).startsWith('kalshi') ? 'Kalshi' : 'Polymarket')]).map(s => `<span class="src">${esc(String(s).toUpperCase())}</span>`).join(' ')}</div>
-        <div data-css="font:600 16px/1.3 var(--sans);margin-top:8px">${esc(e.title)}</div>
-        <div class="note num">${usd(e.volume24hr)} in 24h · ${usd(e.volume)} total${mk.question ? ' · ' + esc(mk.question) : ''}</div>
-        <div class="odds">${outs.map(o => `<span class="odd ${o.implied_pct === fav ? 'fav' : ''}"><span class="row"><b>${esc(o.name)}</b><span class="sp"></span><span>${nf(o.implied_pct, 0)}%</span></span>${o.implied_pct === fav ? '' : `<i class="ob" data-css="${css({ width: Math.max(4, o.implied_pct || 0) + '%' })}"></i>`}</span>`).join('')}</div>`, 'card tap game ' + spc(e.sport)); }).join('');
-    return `${head('Money flow', '24h · Polymarket + Kalshi')}
-      <div class="card acc-aur">${R.map((r, i) => `<div class="lb tap ${spc(r.sport)}" data-sport="${esc(r.sport)}"><span class="rk">${i + 1}</span><div><b>${esc(r.label)}</b> <small class="muted">${r.n_events} events</small><div class="bar"><i data-css="${css({ width: (r.volume24hr / mx * 100).toFixed(1) + '%', 'animation-delay': i * 60 + 'ms' })}"></i></div></div><span class="vol">${usd(r.volume24hr)}</span></div>`).join('') || empty('∅', 'No volume data yet')}</div>
-      ${head('Most-bet events', '% = implied odds')}${evHtml || `<div class="card">${empty('∅', 'No events')}</div>`}
-      <p class="note">${esc(h.disclaimer || '')}</p>`;
-  }
-  function gameCard(g) {
-    const live = g.state === 'in'; const cs = g.competitors || [];
-    const teams = cs.slice(0, g.sport === 'golf' || g.sport === 'f1' ? 6 : 2).map((c, i) => { const key = g.id + ':' + i; const bumped = prevScore[key] != null && prevScore[key] !== c.score && c.score !== ''; prevScore[key] = c.score;
-      const col = c.color ? '#' + String(c.color).replace('#', '') : ''; return `<div class="team ${c.winner ? 'win' : ''} ${String(c.score || '').length > 9 ? 'long' : ''}"><span class="ab ${c.logo ? 'has-img' : ''}" ${col ? `data-css="${css({ '--tc': col })}"` : ''}>${esc((c.abbr || c.name || '?').slice(0, 4))}${c.logo && /^https:\/\/a\.espncdn\.com\//.test(c.logo) ? `<img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(c.logo)}">` : ''}</span><span class="nm">${esc(c.name)}</span><span class="sc num ${bumped ? 'bump' : ''}">${esc(c.score || (g.state === 'pre' ? '' : '0'))}</span></div>`; }).join('');
-    const when = g.state === 'pre' && g.start ? ist(g.start, { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) + ' IST' : '';
-    return ext(g.link, `<div class="lg">${live ? '<span class="live-badge">LIVE</span>' : g.state === 'post' ? '<span class="src">FINAL</span>' : '<span class="src">' + esc(when || 'SOON') + '</span>'}<span>${esc(g.league || '')}</span></div>${teams}<div class="det">${esc([g.clock && live && !String(g.detail).includes(g.clock) ? g.clock : '', g.detail].filter(Boolean).join(' · '))}</div>`, 'card tap game ' + spc(g.sport) + (live ? ' live' : ''));
-  }
-  function sportBoard(s) {
-    const d = sportData(s); if (!d) return `<div class="card"><div class="sk" data-css="height:90px"></div></div><div class="card"><div class="sk" data-css="height:90px"></div></div>`;
-    const G = d.games || []; const live = G.filter(g => g.state === 'in'), pre = G.filter(g => g.state === 'pre').slice(0, 12), post = G.filter(g => g.state === 'post').slice(0, 8);
-    return `${head(d.label || Live.LABEL[s], (Live.sports[s] ? 'live · ' + ago(Live.sports[s].ts / 1000) + ' ago' : 'via box · ' + ago(D.sports && D.sports.ts) + ' ago'))}
-      ${live.length ? `<div class="grid" data-sec="live">${live.map(gameCard).join('')}</div>` : `<div class="card">${empty('○', 'Nothing live right now')}</div>`}
-      ${pre.length ? head('Up next') + `<div class="grid">${pre.map(gameCard).join('')}</div>` : ''}
-      ${post.length ? head('Final') + `<div class="grid">${post.map(gameCard).join('')}</div>` : ''}`;
-  }
+  const bh = (m) => ((D.bet_hist || {})[`${m.source}|${m.url || m.event}|${m.question}`] || []).map(x => x[1]);
+  S_.home = () => {
+    const H_ = D.sports_home || {}; const rk = H_.sports_rank || []; const mv = Math.max(1, ...rk.map(r => r.volume24hr || 0));
+    const live = [].concat(...['cricket', 'nfl', 'nba', 'nhl', 'soccer', 'ncaaf', 'ncaab'].map(k => ((sportData(k) || {}).games || []).filter(g => g.state === 'in'))).slice(0, 8);
+    return `<div class="cols c3"><div>
+      ${head('Most-bet markets', 'implied % · 72h path')}
+      ${P(T([['Market', 'l'], 'Yes', '72h', 'Δ', 'Vol 24h'], (H_.top_markets || []).slice(0, 25).map(m => { const o = (m.outcomes || [])[0] || {}; const h = bh(m); const dlt = h.length > 1 ? h[h.length - 1] - h[0] : null;
+        return `<tr><td class="w">${ext(m.url, esc(m.question || m.event), 'mq')}<small class="m dim">${esc(m.event)} · ${esc((m.sport || '').toUpperCase())} · ${esc(m.source)}</small></td><td>${ok(o.implied_pct) ? o.implied_pct.toFixed(0) + '%' : '—'}</td><td>${spark(h, 'g')}</td><td class="${cls(dlt)}">${ok(dlt) && dlt !== 0 ? sg(dlt, 1) : '<span class="dim">·</span>'}</td><td class="mu">${usd(m.volume24hr)}</td></tr>`; }), 'No markets'))}
+      ${src((H_.disclaimer || '') + ' Price path tracked on the box since first seen.')}
+    </div><div>
+      ${head('Volume by sport', '24h · Polymarket + Kalshi')}
+      ${P(T(['#', ['Sport', 'l'], 'Events', 'Vol 24h', ''], rk.map((r, i) => `<tr class="tap" data-sport="${esc(r.sport)}"><td class="mu">${i + 1}</td><td class="n l">${esc(r.label)}</td><td>${r.n_events}</td><td>${usd(r.volume24hr)}</td><td>${bar((r.volume24hr || 0) / mv, 'g')}</td></tr>`)))}
+      ${head('Live now', live.length + ' games')}
+      ${P(live.map(game).join('') || empty('Nothing live right now'))}
+    </div></div>`;
+  };
+  S_.standings = () => {
+    const St = D.standings || {}; const ks = Object.keys(St).filter(k => St[k] && St[k].groups); if (!ks.length) return P(empty('Standings unavailable'));
+    if (!St[sub.std]) sub.std = ks[0]; const s = St[sub.std]; const soccer = /epl|laliga/.test(sub.std), nhl = sub.std === 'nhl';
+    return segHtml('std', ks.map(k => [k, St[k].label]), true) + `<div class="cols">${(s.groups || []).map(g => `<div>${head(g.name || s.label)}${P(T(['#', ['Team', 'l'], 'W', 'L', soccer ? 'D' : nhl ? 'OTL' : 'Pct', soccer || nhl ? 'Pts' : 'GB', soccer ? 'GD' : 'Diff', 'Strk'], g.rows.map((r, i) => `<tr><td class="mu">${i + 1}</td><td class="n l">${r.logo ? `<img class="lg" src="${esc(r.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}${esc(r.n || r.t)}</td><td>${esc(r.w ?? '—')}</td><td>${esc(r.l ?? '—')}</td><td class="mu">${esc(soccer || nhl ? (r.otl ?? '—') : (r.pct ?? '—'))}</td><td>${esc(soccer || nhl ? (r.pts ?? '—') : (r.gb ?? '—'))}</td><td class="${cls(parseFloat(r.diff))}">${esc(r.diff ?? '—')}</td><td class="${/^W/.test(r.strk || '') ? 'up' : /^L/.test(r.strk || '') ? 'dn' : 'mu'}">${esc(r.strk ?? '—')}</td></tr>`)))}</div>`).join('')}</div>${src('ESPN standings · refreshed every 30 min on the box')}`;
+  };
 
-  /* ── money ── */
+  /* ── live money (read-only) ── */
   V.money = () => {
-    const L = D.live_money || {}; const cap = L.cap_inr || 2000, used = L.used_inr || 0; const frac = Math.min(1, used / cap);
-    const armed = !!L.armed; const arc = 282.7;
-    return `<section class="card glow acc-gold">
-        <div class="reactor"><div class="gauge"><svg viewBox="0 0 220 124"><defs><linearGradient id="gg" x1="0" x2="1"><stop offset="0" stop-color="#ffc53d"/><stop offset=".6" stop-color="#ff8a3d"/><stop offset="1" stop-color="#ff3dcb"/></linearGradient></defs><path class="trk" d="M20 112a90 90 0 0 1 180 0"/><path class="val" id="gval" d="M20 112a90 90 0 0 1 180 0" data-css="${css({ 'stroke-dasharray': arc, 'stroke-dashoffset': arc, stroke: 'url(#gg)' })}" data-off="${(arc * (1 - frac)).toFixed(1)}"/></svg>
-          <div class="ctr"><div class="lbl">Capital at risk</div><div class="mid num grad">${inr(used)} <span class="muted">/ ${inr(cap)}</span></div></div></div>
-          <div class="state ${armed ? 'armed' : 'off'}">${armed ? 'ARMED' : 'DISARMED'}</div>
-          <div class="note">${armed ? 'Real orders can be placed from the box.' : 'No real order can leave the box.'}</div></div>
-        <div class="hazard"></div>
-        <div class="grid g2" data-css="margin-top:14px">
-          <div><div class="lbl">Hard cap</div><div class="mid num grad">${inr(cap)}</div></div>
-          <div><div class="lbl">Max loss / trade</div><div class="mid num grad">${inr(L.per_trade_max_loss_inr)}</div></div>
-        </div>
-      </section>
-      ${head('Kill switch', L.kill_switch ? 'ON' : 'off')}
-      <div class="card acc-opt"><div class="row"><div class="sp"><b>${L.kill_switch ? 'Kill switch is ON' : 'Kill switch is off'}</b><div class="note">Flipping it stops all live trading and disarms. It runs on the box, so tell Chief "kill live money".</div></div><span class="switch ${L.kill_switch ? 'on' : ''}"><i></i></span></div></div>
-      ${head('Gates', 'all must be green')}
-      <div class="card acc-gold">${(L.gates || []).map(g => `<div class="gate-li"><span class="ck ${g.ok ? 'y' : 'n'}">${g.ok ? '✓' : '✕'}</span><span>${esc(g.gate)}</span></div>`).join('') || empty('?', 'Status unavailable')}</div>
+    const L = D.live_money || {}; const cap = L.cap_inr || 2000, used = L.used_inr || 0; const armed = !!L.armed;
+    return `<div class="cols c3"><div>
+      ${P(`<div class="pp"><div class="row1"><div><div class="lbl">Live Money</div><div class="state ${armed ? 'armed' : ''}">${armed ? 'ARMED' : 'DISARMED'}</div></div>${tag('Box only', 'g')}</div>
+        <div class="capbar"><i id="capb" data-w="${Math.min(100, used / cap * 100).toFixed(1)}%"></i></div><div class="legend"><span>${inr(used)} at risk</span><span>cap ${inr(cap)}</span></div>
+        <div class="note bare mt">${armed ? 'Real orders can be placed from the box, inside the cap.' : 'No real order can leave the box. Nothing in this app can place one.'}</div></div>
+        <div class="kpis"><div><div class="lbl">Hard cap</div><div class="v">${inr(cap)}</div></div><div><div class="lbl">Max loss/trade</div><div class="v">${inr(L.per_trade_max_loss_inr)}</div></div><div><div class="lbl">Kill switch</div><div class="v ${L.kill_switch ? 'dn' : ''}">${L.kill_switch ? 'ON' : 'off'}</div></div>
+        <div class="last-row"><div class="lbl">Open</div><div class="v">${nf(L.open_positions || 0)}</div></div><div class="last-row"><div class="lbl">Open capital</div><div class="v">${inr(L.open_capital_inr || 0)}</div></div><div class="last-row"><div class="lbl">Realised</div><div class="v ${cls(L.realized_pnl_inr)}">${sInr(L.realized_pnl_inr || 0)}</div></div></div>`)}
+      ${head('Gates', 'all must pass')}
+      ${P((L.gates || []).map(g => `<div class="li"><span class="ck ${g.ok ? 'y' : 'n'}">${g.ok ? '✓' : '✕'}</span><div class="t"><b>${esc(g.gate)}</b></div></div>`).join('') || empty('Status unavailable'))}
+    </div><div>
       ${head('Brokers')}
-      <div class="card"><div class="list">${(L.brokers || []).map(b => `<div class="li broker ${b.name === 'zerodha' ? 'acc-eq' : 'sp-cricket'}"><span class="logo">${esc(b.name === 'zerodha' ? 'Z' : b.name === 'groww' ? 'G' : b.name[0].toUpperCase())}</span><div class="t"><b>${esc(b.title)}</b><span>${esc(b.state)}</span></div><span class="ck ${b.connected ? 'y' : 'n'}">${b.connected ? '✓' : '✕'}</span></div>`).join('')}</div>
-        <p class="note">To connect, sign in to the broker through Chief on the box. Keys stay on the box, never here.</p></div>
+      ${P(T([['Broker', 'l'], 'Keys', 'Session'], (L.brokers || []).map(b => `<tr><td class="n">${esc(b.title)}</td><td class="${b.configured ? 'up' : 'mu'}">${b.configured ? 'yes' : 'no'}</td><td class="${b.connected ? 'up' : 'mu'}">${esc(b.state)}</td></tr>`)) + '<div class="note">Broker keys live only on the box. Sign-in happens there, never in this app.</div>')}
       ${head('Ledger', (L.ledger || []).length + ' events')}
-      <div class="card"><div class="list">${(L.ledger || []).slice().reverse().map(e => `<div class="li"><div class="t"><b>${esc(e.kind)}</b><span>${esc(e.ist || '')} ${esc((e.reasons || []).join('; '))}</span></div></div>`).join('') || empty('∅', 'No live orders. Nothing real has ever left the box.')}</div></div>
-      <p class="note">This screen is read-only by design. Orders run only from the box through <code>live_money.py</code>, behind every gate above.</p>`;
+      ${P(T([['Time', 'l'], ['Event', 'l'], ['Detail', 'l']], (L.ledger || []).slice().reverse().map(e => `<tr><td class="l tx2">${esc(e.ist || '')}</td><td class="n">${esc(e.kind)}</td><td class="w mu">${esc((e.reasons || []).join('; '))}</td></tr>`), 'No live orders. Nothing real has left the box.'))}
+      ${src((L.execution || '') + ' · ' + (L.ist || ''))}
+    </div></div>`;
   };
-  V.money.after = (root) => { const g = $('#gval', root); if (g) requestAnimationFrame(() => requestAnimationFrame(() => g.style.setProperty('stroke-dashoffset', g.dataset.off))); };
+  V.money.after = (root) => { const b = $('#capb', root); if (b) requestAnimationFrame(() => requestAnimationFrame(() => b.style.setProperty('width', b.dataset.w))); };
 
-  function imgs(root) { $$('img', root).forEach(i => { const off = () => { const ab = i.parentElement; i.remove(); ab && ab.classList.remove('has-img'); }; if (i.complete && !i.naturalWidth) off(); else i.addEventListener('error', off, { once: true }); }); }
-
-  /* ── segmented control ── */
-  const SEGC = { eq: ACC.eq, opt: ACC.opt, meme: ACC.meme, markets: ACC.eq, fno: ACC.opt, breakouts: ['#b8ff3c', '#34f5a4'], crypto: ['#9b5cff', '#ffc53d'], news: ['#19e3c4', '#7cf3ff'], home: ['#ff6ad5', '#8b7bff'] };
-  function segHtml(key, items) { const on = sub[key]; const c = SEGC[on] || (SPC[on] ? [SPC[on], SPC[on]] : ['#8b7bff', '#ff6ad5']);
-    return `<div class="seg" data-seg="${key}" data-css="${css({ '--sa': c[0], '--sb': c[1] })}"><i class="seg-pill"></i>${items.map(([k, t, b]) => `<button data-sub="${k}" class="${sub[key] === k ? 'on' : ''} ${key === 'sports' && k !== 'home' ? spc(k) : ''}">${key === 'sports' && k !== 'home' ? '<i class="sd"></i>' : ''}${esc(t)}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('')}</div><div data-css="height:12px"></div>`; }
+  function imgs(root) { $$('img', root).forEach(i => { const off = () => i.remove(); if (i.complete && !i.naturalWidth) off(); else i.addEventListener('error', off, { once: true }); }); }
   function placeSeg(root, animate = true) { $$('.seg', root).forEach(s => { const on = $('button.on', s), pill = $('.seg-pill', s); if (!on || !pill) return; if (!animate) pill.style.setProperty('transition', 'none');
     pill.style.setProperty('width', on.offsetWidth + 'px'); pill.style.setProperty('transform', `translateX(${on.offsetLeft}px)`); if (!animate) requestAnimationFrame(() => pill.style.removeProperty('transition'));
-    if (on.offsetLeft + on.offsetWidth > s.scrollLeft + s.clientWidth || on.offsetLeft < s.scrollLeft) s.scrollTo({ left: on.offsetLeft - 20, behavior: animate ? 'smooth' : 'auto' }); }); }
+    if (on.offsetLeft + on.offsetWidth > s.scrollLeft + s.clientWidth || on.offsetLeft < s.scrollLeft) s.scrollTo({ left: on.offsetLeft - 24, behavior: animate ? 'smooth' : 'auto' }); }); }
 
   /* ── render ── */
   function render(opts = {}) {
-    if (!D) return; const main = $('#view'); const y = window.scrollY;
-    main.innerHTML = `<div class="view${opts.quiet ? '' : ''}">${V[section]()}</div>`; if (opts.quiet) main.firstChild.style.setProperty('animation', 'none');
+    if (!D) return; const main = $('#view'); const y = scrollY;
+    main.innerHTML = `<div class="view">${V[section]()}</div>`; if (opts.quiet) main.firstChild.style.setProperty('animation', 'none');
     applyCss(main); imgs(main); placeSeg(main, false); V[section].after && V[section].after(main);
-    if (opts.keepScroll) window.scrollTo(0, y); placeDock(); tape();
+    if (opts.keepScroll) scrollTo(0, y); placeDock(); tape();
+    if (section === 'pulse' && sub.pulse === 'crypto') Live.pullFutures();
   }
-  function go(s, sb) { if (sb) { if (s === 'desks') sub.desks = sb; if (s === 'pulse') sub.pulse = sb; } if (section !== s || sb) { section = s; H('light'); window.scrollTo({ top: 0 }); render(); } }
-  function placeDock() { const btns = $$('#dock button'); const i = btns.findIndex(b => b.dataset.go === section); btns.forEach((b, j) => b.classList.toggle('on', j === i)); const b = btns[i], pill = $('#pill'); const DC = { home: ['#7cf3ff', '#ff6ad5'], desks: ['#3d8bff', '#7cc4ff'], pulse: ['#19e3c4', '#8b7bff'], sports: ['#ff8a1f', '#ffc53d'], money: ['#ffc53d', '#ff8a3d'] }[section]; pill.style.setProperty('--pa', DC[0]); pill.style.setProperty('--pb', DC[1]);
-    if (!b) return; const vertical = matchMedia('(min-width:900px)').matches;
-    if (vertical) { pill.style.setProperty('height', b.offsetHeight + 'px'); pill.style.setProperty('transform', `translateY(${b.offsetTop - 8}px)`); }
-    else { pill.style.setProperty('width', b.offsetWidth + 'px'); pill.style.removeProperty('height'); pill.style.setProperty('transform', `translateX(${b.offsetLeft - 7}px)`); } }
+  function go(s, sb) { if (sb) { if (s === 'desks') sub.desks = sb; if (s === 'pulse') sub.pulse = sb; if (s === 'world') sub.world = sb; if (s === 'sports') { sub.sports = sb; if (Live.LABEL[sb]) Live.watch(sb); } }
+    if (section !== s || sb) { section = s; H('light'); scrollTo({ top: 0 }); render(); } }
+  function placeDock() { const btns = $$('#dock button'); const i = btns.findIndex(b => b.dataset.go === section); btns.forEach((b, j) => b.classList.toggle('on', j === i)); const b = btns[i], pill = $('#pill'); if (!b) return;
+    if (matchMedia('(min-width:1000px)').matches) { pill.style.removeProperty('width'); pill.style.setProperty('transform', `translateY(${b.offsetTop}px)`); }
+    else { pill.style.setProperty('width', '22px'); pill.style.setProperty('transform', `translateX(${b.offsetLeft + (b.offsetWidth - 22) / 2}px)`); } }
 
-  /* ── ticker tape ── */
+  /* ── ticker ── */
   function tape() {
-    if (!D) return; const I = (D.markets || {}).indices || {}, p = (D.crypto || {}).prices || {}; const items = [];
-    [['Nifty', 'NIFTY'], ['BankNifty', 'BANKNIFTY'], ['FinNifty', 'FINNIFTY'], ['VIX', 'VIX']].forEach(([k, n]) => { const x = I[k]; if (x) items.push(`<span class="tk"><b>${n}</b><span class="num">${nf(x.ltp, 2)}</span><span class="num ${cls(x.change_pct)}">${x.change_pct >= 0 ? '▲' : '▼'} ${pct(x.change_pct)}</span></span>`); });
-    ['BTC', 'ETH', 'SOL'].forEach(s => { const x = Live.px[s] || p[s]; if (x) items.push(`<span class="tk" data-c="${s}"><b>${s}</b><span class="num">$${nf(x.price, s === 'BTC' ? 0 : 2)}</span><span class="num ${cls(x.change_pct)}">${pct(x.change_pct)}</span></span>`); });
-    const B = books(); const net = B.reduce((a, b) => a + b.eq, 0), today = B.reduce((a, b) => a + (b.today || 0), 0);
-    if (B.length) items.splice(0, 0, `<span class="tk"><b>BOOKS</b><span class="num">${inrS(net)}</span><span class="num ${cls(today)}">${sInr(today)}</span></span>`);
-    const games = [].concat(...['cricket', 'nba', 'soccer', 'nhl', 'nfl'].map(s => ((sportData(s) || {}).games || []).filter(g => g.state === 'in').slice(0, 3)));
-    games.slice(0, 8).forEach(g => items.push(`<span class="tk"><i class="lv"></i><b>${esc((g.competitors || []).map(c => c.abbr || c.name).join(' v '))}</b><span class="num">${esc((g.competitors || []).map(c => c.score).join(' · '))}</span></span>`));
+    if (!D) return; const items = []; const tk = (n, v, c, extra = '') => `<span class="tk"${extra}><b>${esc(n)}</b><span class="px">${v}</span><span class="${cls(c)}">${pct(c)}</span></span>`;
+    const I = (D.markets || {}).indices || {}; [['Nifty', 'NIFTY'], ['BankNifty', 'BANK'], ['VIX', 'VIX']].forEach(([k, n]) => { const x = I[k]; if (x) items.push(tk(n, nf(x.ltp, 2), x.change_pct)); });
+    [['USDINR=X', 'USDINR'], ['BZ=F', 'BRENT'], ['GC=F', 'GOLD'], ['ES=F', 'SPX FUT'], ['^TNX', 'US10Y']].forEach(([s, n]) => { const q = quote(s); if (q && q.p != null) items.push(tk(n, px(q.p), q.cp)); });
+    ['BTC', 'ETH', 'SOL'].forEach(s => { const x = Live.px[s] || ((D.crypto || {}).prices || {})[s]; if (x) items.push(tk(s, px(x.price), x.change_pct, ` data-c="${s}"`)); });
+    const B = books(); const today = B.reduce((a, b) => a + (b.today || 0), 0); if (B.length) items.unshift(`<span class="tk"><b>BOOKS</b><span class="px">${inrS(B.reduce((a, b) => a + (b.eq || 0), 0))}</span><span class="${cls(today)}">${sInrS(today)}</span></span>`);
+    const w = W(); if (w && w.risk) items.push(`<span class="tk"><b>RISK</b><span class="${w.risk.level <= 2 ? 'dn' : 'gold'}">L${w.risk.level}/5</span></span>`);
+    [].concat(...['cricket', 'nfl', 'nba', 'soccer', 'nhl'].map(s => ((sportData(s) || {}).games || []).filter(g => g.state === 'in').slice(0, 2))).slice(0, 6).forEach(g => items.push(`<span class="tk"><i class="dot live"></i><b>${esc((g.competitors || []).map(c => c.abbr || c.name).join(' v '))}</b><span>${esc((g.competitors || []).map(c => c.score).join(' – '))}</span></span>`));
     const track = $('#tape'); const html = items.join(''); if (track.dataset.h === html) return; track.dataset.h = html; track.innerHTML = html + html;
-    track.style.setProperty('animation-duration', Math.max(30, items.length * 6) + 's');
+    track.style.setProperty('animation-duration', Math.max(40, items.length * 7) + 's');
   }
 
   /* ── data loop ── */
   async function poll() {
     clearTimeout(pollT); if (!Vault.unlocked) return;
-    try { const d = await Vault.refresh(); if (d) { D = d; const fresh = section !== 'sports' || sub.sports === 'home'; if (fresh) render({ keepScroll: true, quiet: true }); else tape(); } }
+    try { const d = await Vault.refresh(); if (d) { D = d; if (!(section === 'sports' && Live.sports[sub.sports])) render({ keepScroll: true, quiet: true }); else tape(); } }
     catch (e) { if (e.code === 'REKEY') { lock('Vault was re-keyed. Enter the new passphrase.'); return; } freshness(true); }
     pollT = setTimeout(poll, POLL_MS);
   }
-  function freshness(err) { const b = $('#fresh'); if (!D) return; const a = Date.now() / 1000 - D.ts; b.classList.toggle('stale', a > 600 && a <= 3600); b.classList.toggle('dead', a > 3600 || !!err); $('span', b).textContent = 'sealed ' + ago(D.ts) + ' ago'; }
+  function freshness(err) { const b = $('#fresh'); if (!D) return; const a = Date.now() / 1000 - D.ts; b.classList.toggle('stale', a > 900 && a <= 3600); b.classList.toggle('dead', a > 3600 || !!err); $('span', b).textContent = ago(D.ts); }
 
   /* ── idle lock ── */
   ['pointerdown', 'keydown', 'touchstart', 'wheel', 'scroll'].forEach(ev => addEventListener(ev, () => { lastAct = Date.now(); }, { passive: true, capture: true }));
   setInterval(() => { if (!Vault.unlocked) return; const idle = Date.now() - lastAct; const f = Math.min(1, idle / IDLE_MS);
     const c = $('.idle-ring circle'); c && c.style.setProperty('stroke-dashoffset', (100.5 * f).toFixed(1)); $('#lock').classList.toggle('warn', f > .8);
+    $('#clock').textContent = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false, hour: '2-digit', minute: '2-digit' }) + ' IST';
     freshness(); if (idle >= IDLE_MS) lock('Locked after 10 minutes idle.'); }, 1000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Vault.unlocked && Date.now() - lastAct >= IDLE_MS) lock('Locked after 10 minutes idle.'); });
 
   function lock(msg) {
-    Vault.lock(); Live.stop(); unsub && unsub(); celebrated = false; clearTimeout(pollT); D = null;
+    Vault.lock(); Live.stop(); unsub && unsub(); clearTimeout(pollT); D = null;
     $('#view').innerHTML = ''; $('#tape').innerHTML = ''; $('#tape').dataset.h = ''; for (const k in prevScore) delete prevScore[k];
     const app = $('#app'); app.classList.add('hidden'); app.classList.remove('reveal'); app.setAttribute('aria-hidden', 'true');
     const g = $('#gate'); g.classList.remove('hidden', 'leaving', 'working', 'bad'); $('#pass').value = ''; gateMsg(msg || ''); H('medium'); setupBio();
@@ -384,32 +518,35 @@
 
   /* ── gate ── */
   const gateMsg = (t, err) => { const m = $('#gate-msg'); m.textContent = t; m.classList.toggle('err', !!err); };
+  const shake = () => { const f = $('#unlock'); f.classList.add('shake'); setTimeout(() => f.classList.remove('shake'), 450); };
   async function unlock(pass, viaBio) {
-    const g = $('#gate'), btn = $('#go'); if (!pass) { gateMsg('Enter your passphrase', true); H('error'); g.querySelector('form').classList.add('shake'); setTimeout(() => g.querySelector('form').classList.remove('shake'), 450); return; }
-    btn.disabled = true; g.classList.add('working'); g.classList.remove('bad'); gateMsg('fetching vault · deriving key (600k rounds)…'); H('light');
+    const g = $('#gate'), btn = $('#go'); if (!pass) { gateMsg('Enter your passphrase', true); H('error'); shake(); return; }
+    btn.disabled = true; g.classList.add('working'); g.classList.remove('bad'); gateMsg('Deriving key · 600k rounds'); H('light');
     try {
       const d = await Vault.unlock(pass);
       if (!viaBio && NATIVE && NATIVE.bioAvailable && NATIVE.bioAvailable() && !NATIVE.bioEnrolled() && $('#remember') && $('#remember').checked) { try { NATIVE.bioEnroll(pass); } catch (e) {} }
       pass = null; $('#pass').value = ''; D = d; lastAct = Date.now(); H('success'); gateMsg('');
       g.classList.add('leaving'); const app = $('#app'); app.classList.remove('hidden'); app.classList.add('reveal'); app.addEventListener('animationend', function rv(e) { if (e.target === app) { app.classList.remove('reveal'); app.removeEventListener('animationend', rv); } }); app.setAttribute('aria-hidden', 'false');
-      setTimeout(() => g.classList.add('hidden'), 700);
+      setTimeout(() => g.classList.add('hidden'), 520);
       section = 'home'; render(); Live.start(); unsub = Live.sub(onLive); pollT = setTimeout(poll, POLL_MS);
     } catch (e) {
-      g.classList.add('bad'); H('error'); const f = g.querySelector('form'); f.classList.add('shake'); setTimeout(() => f.classList.remove('shake'), 450);
+      g.classList.add('bad'); H('error'); shake();
       gateMsg(e.code === 'BAD' ? 'That passphrase does not open this vault.' : (e.message || 'Could not reach the vault'), true);
       if (viaBio && e.code === 'BAD' && NATIVE && NATIVE.bioForget) NATIVE.bioForget();
     } finally { btn.disabled = false; g.classList.remove('working'); }
   }
   function onLive(type, x) {
     if (!D) return;
-    if (type === 'px') { if (section === 'pulse' && sub.pulse === 'crypto') paintCoins(); const tk = $$(`#tape [data-c="${x.sym}"]`); tk.forEach(t => { const n = t.children[1]; n.textContent = '$' + nf(x.d.price, x.sym === 'BTC' ? 0 : 2); if (x.d.dir) { t.classList.remove('flash-up', 'flash-down'); void t.offsetWidth; t.classList.add(x.d.dir > 0 ? 'flash-up' : 'flash-down'); } }); }
-    if (type === 'sport') { if (section === 'sports' && sub.sports === x.sport) { const y = scrollY; const main = $('#view'); main.firstChild.innerHTML = V.sports(); applyCss(main); imgs(main); placeSeg(main, false); scrollTo(0, y); if ($('.bump', main)) H('light'); } else if (section === 'sports') { const s = $(`[data-sub="${x.sport}"]`); } tape(); }
+    if (type === 'px') $$(`[data-c="${x.sym}"]`).forEach(t => { const n = $('.px', t); if (n) n.textContent = px(x.d.price); const c = $('.chg', t); if (c) { c.textContent = pct(x.d.change_pct); c.className = 'chg ' + cls(x.d.change_pct); } const r = $('.inr', t); if (r) r.textContent = inrS(x.d.price * fx());
+      if (x.d.dir && t.classList.contains('tk')) { t.classList.remove('flash-up', 'flash-down'); void t.offsetWidth; t.classList.add(x.d.dir > 0 ? 'flash-up' : 'flash-down'); } });
+    if (type === 'fut' && section === 'pulse' && sub.pulse === 'crypto') render({ keepScroll: true, quiet: true });
+    if (type === 'sport') { if (section === 'sports' && sub.sports === x.sport) { render({ keepScroll: true, quiet: true }); if ($('.bump', $('#view'))) H('light'); } tape(); }
   }
   function setupBio() {
-    const b = $('#bio'); const ok = NATIVE && NATIVE.bioAvailable && NATIVE.bioAvailable();
-    b.classList.toggle('hidden', !(ok && NATIVE.bioEnrolled())); const r = $('#remember-wrap'); if (r) r.classList.toggle('hidden', !(ok && !NATIVE.bioEnrolled()));
+    const b = $('#bio'); const okb = NATIVE && NATIVE.bioAvailable && NATIVE.bioAvailable();
+    b.classList.toggle('hidden', !(okb && NATIVE.bioEnrolled())); const r = $('#remember-wrap'); if (r) r.classList.toggle('hidden', !(okb && !NATIVE.bioEnrolled()));
   }
-  window.__vantaBio = (ok, val) => { if (ok) unlock(val, true); else { gateMsg(val || 'Biometric cancelled', !!val); } };
+  window.__vantaBio = (okb, val) => { if (okb) unlock(val, true); else gateMsg(val || 'Biometric cancelled', !!val); };
 
   /* ── events ── */
   $('#unlock').addEventListener('submit', (e) => { e.preventDefault(); unlock($('#pass').value); });
@@ -419,14 +556,13 @@
   $('#fresh').addEventListener('click', () => { H('light'); toast('Checking the vault…'); poll(); });
   $('#dock').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) go(b.dataset.go); });
   $('#view').addEventListener('click', (e) => {
-    const s = e.target.closest('[data-sub]'); if (s) { const key = s.closest('[data-seg]').dataset.seg; if (sub[key] !== s.dataset.sub) { sub[key] = s.dataset.sub; H('light'); if (key === 'sports' && s.dataset.sub === 'home') Live.unwatch(); render(); } return; }
+    const s = e.target.closest('[data-sub]'); if (s) { const key = s.closest('[data-seg]').dataset.seg; if (sub[key] !== s.dataset.sub) { sub[key] = s.dataset.sub; H('light');
+      if (key === 'sports') { if (Live.LABEL[s.dataset.sub]) Live.watch(s.dataset.sub); else Live.unwatch(); } render({ keepScroll: !['sports', 'pulse', 'world', 'desks'].includes(key) }); } return; }
     const j = e.target.closest('[data-jump]'); if (j) { e.preventDefault(); const [a, b] = j.dataset.jump.split(':'); go(a, b); return; }
-    const sp = e.target.closest('[data-sport]'); if (sp && Live.LABEL[sp.dataset.sport]) { sub.sports = sp.dataset.sport; H('light'); render(); return; }
-    const nw = e.target.closest('[data-news]'); if (nw) { sub.news = nw.dataset.news; H('light'); render({ keepScroll: true }); }
+    const sp = e.target.closest('[data-sport]'); if (sp && Live.LABEL[sp.dataset.sport]) { sub.sports = sp.dataset.sport; Live.watch(sp.dataset.sport); H('light'); render(); }
   });
   addEventListener('resize', () => { placeDock(); placeSeg(document, false); });
 
-  // native-only "remember with biometrics" toggle
   if (NATIVE && NATIVE.bioAvailable && NATIVE.bioAvailable()) {
     const w = document.createElement('label'); w.id = 'remember-wrap'; w.className = 'gate-msg'; w.innerHTML = '<input id="remember" type="checkbox" checked> Unlock next time with fingerprint / PIN';
     $('#unlock').insertBefore(w, $('#gate-msg'));

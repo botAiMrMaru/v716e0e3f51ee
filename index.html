@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https://a.espncdn.com; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://api.github.com https://gist.githubusercontent.com https://site.api.espn.com https://site.web.api.espn.com https://data-api.binance.vision wss://data-stream.binance.vision; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https://a.espncdn.com; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://api.github.com https://gist.githubusercontent.com https://site.api.espn.com https://site.web.api.espn.com https://data-api.binance.vision https://fapi.binance.com wss://data-stream.binance.vision; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
 <meta name="googlebot" content="noindex,nofollow">
-<meta name="theme-color" content="#050607">
+<meta name="theme-color" content="#09090a">
 <meta name="color-scheme" content="dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -17,59 +17,55 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-512.png">
-<link rel="preload" href="fonts/unbounded.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/geistmono.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="vanta.css">
 </head>
 <body>
-<div id="aurora" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i><i class="a4"></i><i class="a5"></i></div>
-<div id="grain" aria-hidden="true"></div>
-<canvas id="confetti" aria-hidden="true"></canvas>
-
 <section id="gate" class="gate" aria-label="Unlock">
-  <div class="aperture" aria-hidden="true">
-    <i class="ring r1"></i><i class="ring r2"></i><i class="ring r3"></i><i class="core"></i>
-  </div>
   <div class="gate-body">
+    <div class="crest" aria-hidden="true"></div>
     <div class="brand">VANTA</div>
-    <div class="gate-sub">sealed · zero-knowledge · yours</div>
+    <div class="gate-sub">private terminal · sealed</div>
     <form id="unlock" autocomplete="off" novalidate>
       <label class="field">
-        <input id="pass" type="password" inputmode="text" autocomplete="current-password" autocapitalize="off" spellcheck="false" placeholder="passphrase" aria-label="Passphrase">
-        <button id="peek" type="button" class="peek" aria-label="Show passphrase">◉</button>
+        <input id="pass" type="password" inputmode="text" autocomplete="current-password" autocapitalize="off" spellcheck="false" placeholder="Passphrase" aria-label="Passphrase">
+        <button id="peek" type="button" class="peek" aria-label="Show passphrase"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
       </label>
-      <button id="go" class="unseal" type="submit"><span>Unseal</span></button>
-      <button id="bio" class="bio hidden" type="button">Unlock with fingerprint / PIN</button>
+      <button id="go" class="unseal" type="submit"><span>Unlock</span></button>
+      <button id="bio" class="bio hidden" type="button">Use fingerprint / PIN</button>
       <div id="gate-msg" class="gate-msg" role="status" aria-live="polite"></div>
     </form>
   </div>
-  <div class="gate-foot">AES-256-GCM · PBKDF2 600k · memory-only key</div>
+  <div class="gate-foot">AES-256-GCM · PBKDF2 600k · key in memory only</div>
 </section>
 
 <div id="app" class="app hidden" aria-hidden="true">
   <header class="top">
-    <div class="mark">VANTA</div>
+    <div class="mark">VANTA<i></i></div>
+    <span class="clock num" id="clock"></span>
     <button id="fresh" class="fresh" type="button" aria-label="Data freshness"><i></i><span>—</span></button>
     <button id="lock" class="lockbtn" type="button" aria-label="Lock now">
       <svg viewBox="0 0 36 36" class="idle-ring"><circle cx="18" cy="18" r="16"/></svg>
-      <svg viewBox="0 0 24 24" class="ico"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="10" rx="2.5"/></svg>
+      <svg viewBox="0 0 24 24" class="ico"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="10" rx="2"/></svg>
     </button>
   </header>
   <div class="tape" aria-label="Live ticker"><div class="tape-track" id="tape"></div></div>
   <main id="view" tabindex="-1"></main>
   <nav class="dock" id="dock" aria-label="Sections">
     <i class="dock-pill" id="pill"></i>
-    <button data-go="home"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/></svg><span>Home</span></button>
-    <button data-go="desks"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span>Desks</span></button>
-    <button data-go="pulse"><svg viewBox="0 0 24 24"><path d="M2 12h4l3-7 4 14 3-7h6"/></svg><span>Pulse</span></button>
-    <button data-go="sports"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.6 5.6c3.6 3.6 9.2 3.6 12.8 0M5.6 18.4c3.6-3.6 9.2-3.6 12.8 0"/></svg><span>Sports</span></button>
-    <button data-go="money"><svg viewBox="0 0 24 24"><path d="M12 2v20M17 6.5c0-1.9-2.2-3.5-5-3.5S7 4.6 7 6.5 9.2 10 12 10s5 1.6 5 3.5-2.2 3.5-5 3.5-5-1.6-5-3.5"/></svg><span>Money</span></button>
+    <button data-go="home"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M10 20v-5h4v5"/></svg><span>Home</span></button>
+    <button data-go="desks"><svg viewBox="0 0 24 24"><path d="M3 20h18M6 16v-5M10 16V7M14 16v-7M18 16V4"/></svg><span>Books</span></button>
+    <button data-go="pulse"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 4-7 5 5"/><path d="M3 21h18"/></svg><span>Markets</span></button>
+    <button data-go="world"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.8 3.9 5.8 3.9 9s-1.3 6.2-3.9 9c-2.6-2.8-3.9-5.8-3.9-9S9.4 5.8 12 3z"/></svg><span>World</span></button>
+    <button data-go="sports"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 4.8h-5L8 10z"/><path d="M12 3v4M21 10.5l-5-.5M18 19l-3.5-4.2M6 19l3.5-4.2M3 10.5l5-.5"/></svg><span>Sports</span></button>
+    <button data-go="money"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg><span>Live</span></button>
   </nav>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </div>
 <script src="config.js"></script>
 <script src="vault.js"></script>
+<script src="world.js"></script>
 <script src="live.js"></script>
 <script src="app.js"></script>
 </body>
