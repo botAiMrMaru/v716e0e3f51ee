@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; connect-src 'self' https://api.github.com https://gist.githubusercontent.com https://site.api.espn.com https://site.web.api.espn.com https://data-api.binance.vision wss://data-stream.binance.vision; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet,noimageindex">
+<meta name="googlebot" content="noindex,nofollow">
+<meta name="theme-color" content="#050607">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
+<title>VANTA</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-512.png">
+<link rel="preload" href="fonts/unbounded.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/geistmono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="vanta.css">
+</head>
+<body>
+<div id="grain" aria-hidden="true"></div>
+
+<section id="gate" class="gate" aria-label="Unlock">
+  <div class="aperture" aria-hidden="true">
+    <i class="ring r1"></i><i class="ring r2"></i><i class="ring r3"></i><i class="core"></i>
+  </div>
+  <div class="gate-body">
+    <div class="brand">VANTA</div>
+    <div class="gate-sub">sealed · zero-knowledge · yours</div>
+    <form id="unlock" autocomplete="off" novalidate>
+      <label class="field">
+        <input id="pass" type="password" inputmode="text" autocomplete="current-password" autocapitalize="off" spellcheck="false" placeholder="passphrase" aria-label="Passphrase">
+        <button id="peek" type="button" class="peek" aria-label="Show passphrase">◉</button>
+      </label>
+      <button id="go" class="unseal" type="submit"><span>Unseal</span></button>
+      <button id="bio" class="bio hidden" type="button">Unlock with fingerprint / PIN</button>
+      <div id="gate-msg" class="gate-msg" role="status" aria-live="polite"></div>
+    </form>
+  </div>
+  <div class="gate-foot">AES-256-GCM · PBKDF2 600k · memory-only key</div>
+</section>
+
+<div id="app" class="app hidden" aria-hidden="true">
+  <header class="top">
+    <div class="mark">VANTA</div>
+    <button id="fresh" class="fresh" type="button" aria-label="Data freshness"><i></i><span>—</span></button>
+    <button id="lock" class="lockbtn" type="button" aria-label="Lock now">
+      <svg viewBox="0 0 36 36" class="idle-ring"><circle cx="18" cy="18" r="16"/></svg>
+      <svg viewBox="0 0 24 24" class="ico"><path d="M7 11V8a5 5 0 0 1 10 0v3"/><rect x="5" y="11" width="14" height="10" rx="2.5"/></svg>
+    </button>
+  </header>
+  <div class="tape" aria-label="Live ticker"><div class="tape-track" id="tape"></div></div>
+  <main id="view" tabindex="-1"></main>
+  <nav class="dock" id="dock" aria-label="Sections">
+    <i class="dock-pill" id="pill"></i>
+    <button data-go="home"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v9.5h13V10"/></svg><span>Home</span></button>
+    <button data-go="desks"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span>Desks</span></button>
+    <button data-go="pulse"><svg viewBox="0 0 24 24"><path d="M2 12h4l3-7 4 14 3-7h6"/></svg><span>Pulse</span></button>
+    <button data-go="sports"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.6 5.6c3.6 3.6 9.2 3.6 12.8 0M5.6 18.4c3.6-3.6 9.2-3.6 12.8 0"/></svg><span>Sports</span></button>
+    <button data-go="money"><svg viewBox="0 0 24 24"><path d="M12 2v20M17 6.5c0-1.9-2.2-3.5-5-3.5S7 4.6 7 6.5 9.2 10 12 10s5 1.6 5 3.5-2.2 3.5-5 3.5-5-1.6-5-3.5"/></svg><span>Money</span></button>
+  </nav>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</div>
+<script src="config.js"></script>
+<script src="vault.js"></script>
+<script src="live.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
